@@ -55,7 +55,8 @@ from db.init_db import init_database
 from core.parsers import get_parser_for_filename
 from tools.rag import add_documents_to_knowledge_base
 from core.session import init_reports_dir, cleanup_old_reports, REPORTS_TEMP_DIR
-from db.dashboard import get_all_projects, get_project_timeline
+from db.dashboard import get_all_projects, get_project_timeline, get_pending_notifications, update_notification_status
+from db.suggestions import get_dynamic_suggestions
 import os
 
 from contextlib import asynccontextmanager
@@ -293,8 +294,13 @@ async def chat_endpoint(request: ChatRequest):
                     if latest_msg.type == "ai" and not getattr(latest_msg, "tool_calls", None):
                         final_ai_msg = latest_msg.content
 
-                if final_ai_msg:
-                    save_chat_message(thread_id, "assistant", final_ai_msg)
+                # Persist assistant's final response with metadata
+                save_chat_message(
+                    thread_id=thread_id,
+                    role="assistant",
+                    content=final_ai_msg,
+                    metadata={"reasoning": None}
+                )
 
                 return ChatResponse(
                     thread_id=thread_id,
@@ -391,6 +397,7 @@ async def chat_stream_endpoint(request: ChatRequest):
         try:
             finished = False
             # We use stream_mode="updates" to get individual node outputs
+            reported_urls = set()
             for chunk in graph.stream(initial_state, config=config, stream_mode="updates"):
                 if finished: break
                 for node_name, data in chunk.items():
@@ -431,10 +438,14 @@ async def chat_stream_endpoint(request: ChatRequest):
                                         type_ = "excel"
                                     elif "zip" in filename:
                                         type_ = "image_bundle"
+                                    elif "pdf" in filename:
+                                        type_ = "pdf"
                                     else:
                                         type_ = "image"
                                         
-                                    yield f"data: {json.dumps({'type': 'report_ready', 'url': url, 'filename': filename, 'report_type': type_})}\n\n"
+                                    if url not in reported_urls:
+                                        yield f"data: {json.dumps({'type': 'report_ready', 'url': url, 'filename': filename, 'report_type': type_})}\n\n"
+                                        reported_urls.add(url)
                     
                     await asyncio.sleep(0.05) # Responsive but controlled flow
 
@@ -477,7 +488,7 @@ async def chat_stream_endpoint(request: ChatRequest):
             reasoning = final_state.values.get("routing_reasoning")
 
             if final_ai_msg:
-                save_chat_message(thread_id, "assistant", final_ai_msg)
+                save_chat_message(thread_id, "assistant", final_ai_msg, metadata={"reasoning": reasoning})
 
             yield f"data: {json.dumps({'type': 'final_answer', 'response': final_ai_msg, 'reasoning': reasoning, 'thread_id': thread_id})}\n\n"
             
@@ -507,8 +518,8 @@ async def list_chat_threads() -> List[ChatThread]:
     return [
         ChatThread(
             thread_id=row["thread_id"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
+            created_at=row["created_at"] + ("Z" if "Z" not in row["created_at"] else ""),
+            updated_at=row["updated_at"] + ("Z" if "Z" not in row["updated_at"] else ""),
             last_message=row.get("last_message") or "",
             message_count=int(row.get("message_count") or 0),
         )
@@ -522,7 +533,12 @@ async def get_chat_history_endpoint(thread_id: str) -> List[ChatHistoryItem]:
         raise HTTPException(status_code=404, detail="Chat thread not found")
     rows = get_chat_history(thread_id)
     return [
-        ChatHistoryItem(role=row["role"], message=row["message"], timestamp=row["timestamp"])
+        ChatHistoryItem(
+            role=row["role"], 
+            message=row["message"], 
+            timestamp=row["timestamp"],
+            metadata=row.get("metadata")
+        )
         for row in rows
     ]
 
@@ -605,6 +621,40 @@ async def simulate_project_lifecycle(project_id: str):
     # In a real app, this would trigger agent actions.
     # For now, we'll just return a success message.
     return {"message": f"Simulation started for project {project_id}"}
+
+
+@app.get("/dashboard/notifications")
+async def get_dashboard_notifications_endpoint():
+    """Fetch pending meeting notifications."""
+    try:
+        return get_pending_notifications()
+    except Exception as e:
+        logger.error(f"Failed to fetch notifications: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/dashboard/notifications/{transcript_id}/action")
+async def handle_notification_action(transcript_id: int, action: str = Body(..., embed=True)):
+    """Handle actions on notifications (e.g., 'DONE' for Make RFP, 'REJECTED' for Reject)."""
+    try:
+        status = "DONE" if action == "make_rfp" else "REJECTED"
+        success = update_notification_status(transcript_id, status)
+        if not success:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        return {"status": "success", "action_taken": action}
+    except Exception as e:
+        logger.error(f"Failed to process notification action: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chat/suggestions/{thread_id}")
+async def get_chat_suggestions_endpoint(thread_id: str):
+    """Fetch dynamic suggestions for the current thread."""
+    try:
+        return get_dynamic_suggestions(thread_id)
+    except Exception as e:
+        logger.error(f"Failed to fetch suggestions: {e}")
+        return ["What is the current status?", "Show latest milestones.", "Check project budget."]
 
 
 @app.get("/reports/download/{filename}")

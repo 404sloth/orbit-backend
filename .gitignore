@@ -60,3 +60,5 @@ checkpoints.db
 # Logs
 *.log
 
+# DB Feed
+db_feed.py

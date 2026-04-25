@@ -21,9 +21,12 @@ def get_all_projects() -> List[Dict[str, Any]]:
                     ELSE 'red'
                 END as health_color,
                 (
-                    SELECT COUNT(*) * 100 / COUNT(*) 
+                    SELECT CASE 
+                        WHEN COUNT(*) = 0 THEN 0 
+                        ELSE SUM(CASE WHEN m.status = 'Completed' THEN 1 ELSE 0 END) * 100 / COUNT(*) 
+                    END
                     FROM milestones m 
-                    WHERE m.sow_id = s.sow_id AND m.status = 'Completed'
+                    WHERE m.sow_id = s.sow_id
                 ) as progress_percent
             FROM projects p
             LEFT JOIN statements_of_work s ON p.project_id = s.project_id
@@ -97,3 +100,33 @@ def get_project_timeline(project_id: str) -> List[Dict[str, Any]]:
     # Sort unified timeline by date descending
     timeline.sort(key=lambda x: x['date'] or '', reverse=True)
     return timeline
+
+def get_pending_notifications() -> List[Dict[str, Any]]:
+    """
+    Fetch meeting transcripts that are PENDING processing.
+    """
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT 
+                transcript_id as id,
+                project_id,
+                meeting_date as date,
+                meeting_type as title,
+                cleaned_summary as summary
+            FROM meeting_transcripts
+            WHERE processing_status = 'PENDING'
+            ORDER BY meeting_date DESC
+        """).fetchall()
+    return [dict(row) for row in rows]
+
+def update_notification_status(transcript_id: int, status: str) -> bool:
+    """
+    Update the processing status of a transcript (e.g., DONE, REJECTED).
+    """
+    with get_db_connection(read_only=False) as conn:
+        cursor = conn.execute(
+            "UPDATE meeting_transcripts SET processing_status = ? WHERE transcript_id = ?",
+            (status, transcript_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0

@@ -3,7 +3,7 @@ Centralized Pydantic schemas for all Orbit tools.
 Provides strict type validation and rich descriptions for LLM tool binding.
 """
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 # ========================== SQL Tool Schemas ==========================
@@ -48,9 +48,9 @@ class SearchDocumentsSchema(BaseModel):
     query: str = Field(
         description="A semantic search query to find relevant project documents, transcripts, or requirements."
     )
-    top_k: int = Field(
+    top_k: Optional[Any] = Field(
         default=3,
-        description="Maximum number of relevant document chunks to return (1-10)."
+        description="Maximum number of relevant document chunks to return. MUST be an integer between 1 and 10. If a string is provided, it will be converted."
     )
 
 class AddDocumentsSchema(BaseModel):
@@ -62,6 +62,22 @@ class AddDocumentsSchema(BaseModel):
         description="Descriptive source label for the document (e.g., 'Meeting Transcript - April 12')."
     )
 
+
+class GenerateReportSchema(BaseModel):
+    """Schema for the generate_executive_report tool."""
+    doc_type: str = Field(
+        description="Type of document to generate: 'Meeting Summary', 'RFP', 'SOW', or 'Project Brief'."
+    )
+    title: str = Field(
+        description="The primary title of the document (e.g., 'Project Phoenix Status Report')."
+    )
+    subtitle: Optional[str] = Field(
+        None,
+        description="A secondary subtitle or date range."
+    )
+    content_markdown: str = Field(
+        description="The full content of the document in Markdown format. Use headings (#) for sections."
+    )
 
 # ========================== API Schemas ==========================
 
@@ -88,3 +104,4 @@ class ChatHistoryItem(BaseModel):
     role: str
     message: str
     timestamp: str
+    metadata: Optional[Dict[str, Any]] = None

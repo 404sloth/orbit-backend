@@ -198,6 +198,14 @@ CREATE TABLE IF NOT EXISTS dashboard_metrics (
     reason      TEXT,
     updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS milestone_tasks (
+    task_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    milestone_id      INTEGER NOT NULL,
+    task_description  TEXT NOT NULL,
+    is_completed      INTEGER DEFAULT 0,
+    FOREIGN KEY (milestone_id) REFERENCES milestones(milestone_id) ON DELETE CASCADE
+);
 """
 
 SEED_DATA = """
@@ -254,7 +262,9 @@ VALUES
 INSERT OR IGNORE INTO statements_of_work (sow_id, project_id, vendor_id, total_budget, start_date, end_date, signed_date)
 VALUES
     (1, 1, 1, 695000, '2025-04-01', '2025-10-15', '2025-03-18'),
-    (2, 4, 3, 185000, '2024-07-15', '2024-12-31', '2024-07-01');
+    (2, 4, 3, 185000, '2024-07-15', '2024-12-31', '2024-07-01'),
+    (3, 2, 4, 375000, '2025-05-01', '2025-09-30', '2025-04-10'),
+    (4, 3, 2, 910000, '2025-08-01', '2026-03-31', '2025-07-15');
 
 -- ===== MILESTONES =====
 INSERT OR IGNORE INTO milestones (milestone_id, sow_id, milestone_name, description, planned_delivery_date, actual_delivery_date, status, payment_amount)
@@ -266,7 +276,9 @@ VALUES
     (5, 1, 'M5 – Go‑Live & Warranty',                'Production cutover, hypercare support for 30 days, knowledge transfer to internal DevOps team.',                                      '2025-10-15', NULL,         'Pending',     150000),
     (6, 2, 'M1 – Security Baseline Assessment',       'Full vulnerability scan and penetration test of supplier portal APIs and backend services. Deliver risk‑ranked findings report.',       '2024-08-31', '2024-08-28', 'Completed',    60000),
     (7, 2, 'M2 – Critical Remediation',               'Remediate all critical and high‑severity findings; implement WAF rules and API rate limiting.',                                        '2024-10-15', '2024-10-20', 'Delayed',      75000),
-    (8, 2, 'M3 – Compliance Evidence Package',        'Compile SOC2 Type II evidence, including access reviews, change management logs, and incident response runbooks.',                     '2024-12-15', '2024-12-10', 'Completed',    50000);
+    (8, 2, 'M3 – Compliance Evidence Package',        'Compile SOC2 Type II evidence, including access reviews, change management logs, and incident response runbooks.',                     '2024-12-15', '2024-12-10', 'Completed',    50000),
+    (9, 3, 'M1 – Design Phase',                       'Finalize UI/UX mockups and accessibility compliance plan.',                                                                           '2025-06-01', NULL,         'In-Progress', 50000),
+    (10, 4, 'M1 – Architecture Setup',                'Provision GPU cluster and setup MLOps pipelines.',                                                                                    '2025-09-01', NULL,         'Pending',     120000);
 
 -- ===== PROJECT REQUIREMENTS =====
 INSERT OR IGNORE INTO project_requirements (requirement_id, project_id, category, description, is_mandatory, priority)
@@ -412,6 +424,27 @@ INSERT OR IGNORE INTO dashboard_metrics (metric_id, metric_key, status, reason, 
 VALUES
     (1, 'active_project_count', 'GREEN', '4 projects currently active.', '2025-04-25T10:00:00'),
     (2, 'health_check', 'YELLOW', 'erp-api endpoint DOWN for Phoenix ERP.', '2025-04-25T10:00:00');
+
+-- ===== MILESTONE TASKS =====
+INSERT OR IGNORE INTO milestone_tasks (milestone_id, task_description, is_completed)
+VALUES
+    (1, 'Identify legacy ERP modules', 1),
+    (1, 'Map data dependencies for Finance', 1),
+    (1, 'Audit HR module data integrity', 1),
+    (2, 'Setup staging PostgreSQL instance', 1),
+    (2, 'Execute migration scripts for core tables', 0),
+    (2, 'Run data reconciliation validation', 0),
+    (6, 'Full vulnerability scan of APIs', 1),
+    (6, 'Penetration test of supplier portal', 1),
+    (6, 'Generate risk-ranked findings report', 1),
+    (7, 'Implement WAF rules for top-tier threats', 0),
+    (7, 'Apply API rate limiting across services', 1),
+    (8, 'Compile SOC2 Type II evidence package', 1),
+    (8, 'Finalize access review logs', 1),
+    (9, 'Create high-fidelity Figma mockups', 1),
+    (9, 'Conduct initial screen reader audit', 0),
+    (10, 'Configure Kueue GPU scheduling', 0),
+    (10, 'Setup model registry', 0);
 """
 
 

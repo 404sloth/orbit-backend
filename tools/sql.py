@@ -73,7 +73,7 @@ def execute_read_query(query: str) -> str:
         return json.dumps({"status": "error", "data": None, "message": f"SQL_ERROR: {str(e)}"})
 
 
-@tool
+@tool(args_schema=ListTablesSchema)
 def list_database_tables() -> str:
     """
     Lists all available tables in the project database.

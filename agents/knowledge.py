@@ -92,6 +92,7 @@ RULES:
     except Exception as e:
         logger.exception("RAG Agent execution failed")
         from langchain_core.messages import AIMessage
+        err_msg = str(e) if str(e).strip() else repr(e)
         return {
-            "messages": [AIMessage(content=f"Knowledge Agent Error: {str(e)}. Please try rephrasing your question.")]
+            "messages": [AIMessage(content=f"Knowledge Agent Error: {err_msg}. Please try rephrasing your question.")]
         }

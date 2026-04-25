@@ -31,7 +31,14 @@ def search_project_documents(query: str, top_k: int = 3) -> str:
     """
     try:
         vector_store = get_vector_store()
-        docs = vector_store.similarity_search(query, k=top_k)
+        
+        # Robust integer conversion for Groq compatibility
+        try:
+            k_val = int(top_k) if top_k is not None else 3
+        except (ValueError, TypeError):
+            k_val = 3
+            
+        docs = vector_store.similarity_search(query, k=k_val)
 
         if not docs:
             return json.dumps({

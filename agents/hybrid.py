@@ -16,11 +16,12 @@ from tools.sql import (
     cache_dashboard_metric,
 )
 from tools.rag import search_project_documents
+from tools.document import generate_executive_report
 
 def hybrid_node(state: GraphState) -> dict:
     """
     Strategic Intelligence sub-agent node.
-    Combines SQL and RAG tools for joint analysis.
+    Combines SQL, RAG, and Document Generation tools.
     """
     llm = get_llm(temperature=0)
     tools = [
@@ -29,6 +30,7 @@ def hybrid_node(state: GraphState) -> dict:
         describe_table_schema,
         cache_dashboard_metric,
         search_project_documents,
+        generate_executive_report,
     ]
 
     # Retrieve dynamic schema context for SQL
@@ -46,20 +48,12 @@ AVAILABLE TOOLS:
 1. SQL: list_database_tables, describe_table_schema, execute_read_query.
 2. RAG: search_project_documents.
 3. DASHBOARD: cache_dashboard_metric (use to flag critical risks/milestones).
+4. DOCUMENTS: generate_executive_report (use to create premium PDFs of your findings).
 
 WORKFLOW:
 1. JOINT ANALYSIS: For any question about "status" or "meetings", use BOTH sources.
-   - Use SQL to get the latest numbers, dates, and milestone names.
-   - Use RAG to get the discussion points, reasoning, and context from transcripts.
-2. SYNTHESIZE: Combine the findings into a single informative response. 
-   - e.g., "SQL shows project X is at 50% budget, but the latest meeting transcript (RAG) indicates a delay due to..."
-3. BE INFORMATIVE: Don't just give raw data. Provide executive-level insights.
-4. CITE SOURCES: Mention the tables or document sources explicitly.
-
-RULES:
-- NEVER assume data. If it's not in SQL or RAG, say so.
-- Always name SQL columns explicitly.
-- If you find no new actions to take, you MUST finish.
+2. SYNTHESIZE: Combine findings into a single informative response.
+3. DOCUMENTATION: If the user asks for a 'document', 'PDF', or 'formal summary', use generate_executive_report.
 """
 
     try:
@@ -106,6 +100,7 @@ RULES:
     except Exception as e:
         logger.exception("Strategic Intelligence Agent failed")
         from langchain_core.messages import AIMessage
+        err_msg = str(e) if str(e).strip() else repr(e)
         return {
-            "messages": [AIMessage(content=f"Strategic Intelligence Error: {str(e)}. Please try rephrasing.")]
+            "messages": [AIMessage(content=f"Strategic Intelligence Error: {err_msg}. Please try rephrasing.")]
         }

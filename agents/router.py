@@ -137,8 +137,8 @@ AVAILABLE AGENTS (with capabilities):
 3. rag – Knowledge Agent. Searches unstructured documents (meeting transcripts, emails, PDFs).
    Use for: "What did we agree with vendor X last month?", "Summarise the compliance risks mentioned in the last board meeting."
 4. human – Human Approval Gate. Use ONLY for irreversible actions like "Approve vendor selection", "Release payment milestone", or "Large data exports (over 100 rows)".
-5. report – Report Generator. Use for any request containing: "report", "export", "excel", "spreadsheet", "download data", "generate a summary table". 
-   If the report is large or sensitive, you may route to 'human' FIRST to get approval before generating.
+5. report – Report & Document Generator. Use for any request containing: "report", "export", "excel", "spreadsheet", "generate document", "make PDF", "RFP", "SOW".
+   It can generate both data spreadsheets (Excel) and premium executive summaries (PDF).
 6. image – Image Generator. Use ONLY after a report has been generated and the user says "proceed" or "generate image from that report".
 7. FINISH – TASK IS DONE. Use when the conversation history contains a final answer to the user's request and no further action is needed.
 
@@ -150,7 +150,7 @@ RULES:
 - Prefer hybrid for ambiguous executive queries that could touch both numbers and narrative.
 - Provide concise reasoning.
 
-You MUST output your response in the following JSON format:
+You MUST output your response in STRICTOR JSON format. DO NOT include any conversational filler or pre-text.
 {{{{
   "next_node": "agent_name",
   "confidence": 0.9,
@@ -164,17 +164,37 @@ You MUST output your response in the following JSON format:
         raw_result = (prompt | llm).invoke({"messages": pruned_messages})
         content = raw_result.content if hasattr(raw_result, "content") else str(raw_result)
         
-        # Parse JSON manually to support all models
+        # Parse JSON robustly
         try:
             if not content or content.strip() == "":
                 logger.warning("Supervisor received empty response from LLM")
                 result = default_decision
             else:
-                # Handle potential markdown code blocks in LLM output
+                # 1. Try finding JSON within markdown blocks
                 if "```json" in content:
                     content = content.split("```json")[1].split("```")[0].strip()
                 elif "```" in content:
                     content = content.split("```")[1].split("```")[0].strip()
+                
+                # 2. If it's still not clean JSON, find the first '{' and last '}'
+                # This handles conversational filler like "Sure, here is the JSON: { ... }"
+                if "{" in content and "}" in content:
+                    start_idx = content.find("{")
+                    # Find the corresponding closing brace for the first opening brace
+                    # to avoid including trailing conversational filler
+                    depth = 0
+                    end_idx = -1
+                    for i in range(start_idx, len(content)):
+                        if content[i] == "{":
+                            depth += 1
+                        elif content[i] == "}":
+                            depth -= 1
+                            if depth == 0:
+                                end_idx = i + 1
+                                break
+                    
+                    if end_idx != -1:
+                        content = content[start_idx:end_idx]
                 
                 result = json.loads(content)
         except Exception as json_err:

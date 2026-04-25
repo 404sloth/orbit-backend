@@ -35,8 +35,10 @@ def sql_node(state: GraphState) -> dict:
         cache_dashboard_metric,
     ]
 
-    # Retrieve dynamic schema context
+    # Retrieve dynamic schema context (only essential tables if possible)
     table_names = get_table_names()
+    # If the request mentions specific tables, we could filter here, 
+    # but for now we'll just ensure the schema is clean.
     schema_context = get_bcnf_schema(table_names)
 
     sys_msg = f"""You are the Data Analyst Agent for an executive project dashboard.
@@ -117,6 +119,7 @@ SQL RULES (STRICT):
     except Exception as e:
         logger.exception("SQL Agent execution failed")
         from langchain_core.messages import AIMessage
+        err_msg = str(e) if str(e) else repr(e)
         return {
-            "messages": [AIMessage(content=f"Data Analyst Error: {str(e)}. Please try rephrasing your question.")]
+            "messages": [AIMessage(content=f"Data Analyst Error: {err_msg}. Please try rephracing your question.")]
         }

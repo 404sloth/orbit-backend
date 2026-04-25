@@ -59,13 +59,13 @@ echo -e "${GREEN}✓ Virtual environment activated${NC}"
 
 echo ""
 echo -e "${YELLOW}Step 3: Installing Python dependencies...${NC}"
-pip install -q --upgrade pip
-pip install -q -r "$PROJECT_ROOT/app/requirements.txt"
+
+uv pip install -q -r "$PROJECT_ROOT/requirements.txt"
 echo -e "${GREEN}✓ Python dependencies installed${NC}"
 
 echo ""
 echo -e "${YELLOW}Step 4: Installing Node.js dependencies...${NC}"
-cd "$PROJECT_ROOT/web"
+cd "../web"
 npm install --silent
 echo -e "${GREEN}✓ Node.js dependencies installed${NC}"
 

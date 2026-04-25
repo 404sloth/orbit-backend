@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from typing import List, Optional, Dict
 from db.client import get_db_connection
 
@@ -15,15 +16,16 @@ def create_thread(thread_id: str, user_id: Optional[str] = None) -> None:
         conn.commit()
 
 
-def save_chat_message(thread_id: str, role: str, content: str) -> None:
+def save_chat_message(thread_id: str, role: str, content: str, metadata: Optional[Dict] = None) -> None:
     create_thread(thread_id)
     with get_db_connection(read_only=False) as conn:
+        meta_json = json.dumps(metadata) if metadata else None
         conn.execute(
             """
-            INSERT INTO chat_messages (thread_id, role, content)
-            VALUES (?, ?, ?)
+            INSERT INTO chat_messages (thread_id, role, content, metadata)
+            VALUES (?, ?, ?, ?)
             """,
-            (thread_id, role, content),
+            (thread_id, role, content, meta_json),
         )
         conn.execute(
             """
@@ -36,18 +38,32 @@ def save_chat_message(thread_id: str, role: str, content: str) -> None:
         conn.commit()
 
 
-def get_chat_history(thread_id: str) -> List[Dict[str, str]]:
+def get_chat_history(thread_id: str) -> List[Dict[str, any]]:
     with get_db_connection() as conn:
         rows = conn.execute(
             """
-            SELECT role, content AS message, created_at AS timestamp
+            SELECT role, content AS message, created_at AS timestamp, metadata
             FROM chat_messages
             WHERE thread_id = ?
             ORDER BY created_at ASC, message_id ASC
             """,
             (thread_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+    
+    results = []
+    for row in rows:
+        item = dict(row)
+        # Ensure timestamp is treated as UTC by appending 'Z' if missing
+        if item.get("timestamp") and "Z" not in item["timestamp"]:
+            item["timestamp"] = item["timestamp"].replace(" ", "T") + "Z"
+            
+        if item.get("metadata"):
+            try:
+                item["metadata"] = json.loads(item["metadata"])
+            except:
+                item["metadata"] = {}
+        results.append(item)
+    return results
 
 
 def get_chat_threads(limit: int = 50) -> List[Dict[str, Optional[str]]]:
