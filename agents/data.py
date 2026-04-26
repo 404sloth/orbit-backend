@@ -66,7 +66,10 @@ SQL RULES (STRICT):
 - FORBIDDEN: Any DML (INSERT/UPDATE/DELETE/DROP).
 - REQUIRED: Use table_name.column_name when joining.
 - RECOMMENDED: Use LIMIT for large tables.
-- FINAL ACTION: Your last message MUST be a clear answer to the user's question based on the data found.
+- FINAL ACTION: Your last message MUST be a clear, professional answer based on the data.
+- DO NOT mention internal agent names (e.g., "sql", "rag") or internal tool names (e.g., "execute_query").
+- DO NOT use internal markers like [SYSTEM] or [AGENT_COMPLETE].
+- Keep the strategic context focused on executive decision-making.
 """
 
     try:

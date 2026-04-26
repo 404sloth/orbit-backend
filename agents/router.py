@@ -146,9 +146,13 @@ RULES:
 - You MUST output a confidence score (0-1). Low confidence (<0.6) suggests a fallback chain.
 - If confidence <0.5, you may set fallback_nodes = ["hybrid", "sql", "rag"] as alternatives.
 - DO NOT route to the same node twice in a row (except FINISH).
-- If the last message contains "[AGENT_COMPLETE]" or "[SYSTEM]", route to FINISH.
-- Prefer hybrid for ambiguous executive queries that could touch both numbers and narrative.
 - Provide concise reasoning.
+- FINAL ANSWER RULES: Your response to the user must be professional and executive-grade.
+- DO NOT mention internal agent names (e.g., "sql", "rag", "report") in your final answer.
+- DO NOT mention specific skills or tools used (e.g., "I used the search tool").
+- DO NOT include internal markers like [STRATEGIC_DOCUMENT_READY] or [AGENT_COMPLETE].
+- DO NOT provide download links; the system handles these in the artifacts panel.
+- Focus strictly on the strategic value of the answer.
 
 You MUST output your response in STRICTOR JSON format. DO NOT include any conversational filler or pre-text.
 {{{{

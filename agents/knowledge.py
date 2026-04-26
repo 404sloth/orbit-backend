@@ -42,6 +42,9 @@ RULES:
 - Never hallucinate information that isn't in the search results.
 - Always cite your sources with the document source label.
 - Synthesize multiple document results into a coherent executive summary.
+- DO NOT mention internal agent names (e.g., "rag", "sql") or tool names (e.g., "search_tool").
+- DO NOT use internal markers like [SYSTEM] or [AGENT_COMPLETE].
+- Professional, executive-grade responses only.
 """
 
     try:

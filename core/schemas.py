@@ -83,25 +83,27 @@ class GenerateReportSchema(BaseModel):
 
 class ChatRequest(BaseModel):
     """Incoming chat request from the React frontend."""
-    prompt: str
-    thread_id: Optional[str] = None
+    prompt: str = Field(..., description="The user's text prompt or question to the AI assistant.")
+    thread_id: Optional[str] = Field(None, description="Unique identifier for the chat thread. If omitted, a new thread will be created.")
 
 class ChatResponse(BaseModel):
     """Outgoing chat response to the React frontend."""
-    thread_id: str
-    response: str
-    reasoning: Optional[str] = None
-    requires_approval: bool = False
+    thread_id: str = Field(..., description="The unique identifier for the chat thread.")
+    response: str = Field(..., description="The AI's generated response in markdown format.")
+    reasoning: Optional[str] = Field(None, description="Internal reasoning or routing logic used to generate the response.")
+    requires_approval: bool = Field(False, description="Flag indicating if the action requires human approval before proceeding.")
 
 class ChatThread(BaseModel):
-    thread_id: str
-    created_at: str
-    updated_at: str
-    last_message: Optional[str] = None
-    message_count: int = 0
+    """Representation of a conversation thread."""
+    thread_id: str = Field(..., description="Unique UUID for the conversation thread.")
+    created_at: str = Field(..., description="ISO 8601 timestamp of when the thread was created.")
+    updated_at: str = Field(..., description="ISO 8601 timestamp of the last activity in the thread.")
+    last_message: Optional[str] = Field(None, description="The content of the most recent message in the thread.")
+    message_count: int = Field(0, description="Total number of messages exchanged in this thread.")
 
 class ChatHistoryItem(BaseModel):
-    role: str
-    message: str
-    timestamp: str
-    metadata: Optional[Dict[str, Any]] = None
+    """A single message entry in the chat history."""
+    role: str = Field(..., description="The role of the message sender ('user' or 'assistant').")
+    message: str = Field(..., description="The text content of the message.")
+    timestamp: str = Field(..., description="ISO 8601 timestamp of when the message was sent.")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Optional structured metadata associated with the message (e.g., reasoning, tool usage).")

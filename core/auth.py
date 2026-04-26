@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, validator, Field
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
@@ -42,26 +42,31 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 # Pydantic Models
 class Token(BaseModel):
-    access_token: str
-    token_type: str
-    expires_in: int
-    refresh_token: Optional[str] = None
+    """Authentication token response."""
+    access_token: str = Field(..., description="The JWT access token used for authenticated requests.")
+    token_type: str = Field(..., description="The type of the token, typically 'bearer'.")
+    expires_in: int = Field(..., description="The number of seconds until the access token expires.")
+    refresh_token: Optional[str] = Field(None, description="An optional refresh token to obtain new access tokens.")
 
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str
+    """Request body for refreshing an access token."""
+    refresh_token: str = Field(..., description="The valid refresh token.")
 
 class TokenData(BaseModel):
-    username: Optional[str] = None
-    role: Optional[str] = None
+    """Data encoded within the JWT token."""
+    username: Optional[str] = Field(None, description="The username of the authenticated user.")
+    role: Optional[str] = Field(None, description="The role assigned to the user (e.g., 'ADMIN', 'USER').")
 
 class UserBase(BaseModel):
-    username: str
-    email: Optional[EmailStr] = None
-    role: str = "USER"
-    is_active: bool = True
+    """Base schema for user-related information."""
+    username: str = Field(..., description="Unique username for the account.")
+    email: Optional[EmailStr] = Field(None, description="Valid email address for communications.")
+    role: str = Field("USER", description="Access level role assigned to the user.")
+    is_active: bool = Field(True, description="Status indicating if the account is currently active.")
 
 class UserCreate(UserBase):
-    password: str
+    """Schema for creating a new user."""
+    password: str = Field(..., description="Strong password for the new account.")
 
     @validator('password')
     def password_strength(cls, v):
@@ -85,28 +90,32 @@ class UserCreate(UserBase):
         return v
 
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    is_active: Optional[bool] = None
+    """Schema for updating user details."""
+    email: Optional[EmailStr] = Field(None, description="New email address to update.")
+    is_active: Optional[bool] = Field(None, description="New activation status.")
 
 class UserInDB(UserBase):
-    user_id: int
-    hashed_password: str
-    is_verified: bool = False
-    failed_attempts: int = 0
-    locked_until: Optional[datetime] = None
-    last_login: Optional[datetime] = None
-    last_failed_login: Optional[datetime] = None
-    password_changed_at: datetime
-    created_at: datetime
-    updated_at: datetime
+    """Complete user representation as stored in the database."""
+    user_id: int = Field(..., description="Unique internal database ID.")
+    hashed_password: str = Field(..., description="Salted and hashed password string.")
+    is_verified: bool = Field(False, description="Flag indicating if the email has been verified.")
+    failed_attempts: int = Field(0, description="Count of consecutive failed login attempts.")
+    locked_until: Optional[datetime] = Field(None, description="Timestamp until the account is locked out.")
+    last_login: Optional[datetime] = Field(None, description="Timestamp of the last successful login.")
+    last_failed_login: Optional[datetime] = Field(None, description="Timestamp of the last failed login attempt.")
+    password_changed_at: datetime = Field(..., description="Timestamp of the last password change.")
+    created_at: datetime = Field(..., description="Timestamp of account creation.")
+    updated_at: datetime = Field(..., description="Timestamp of the last update to the account.")
 
 class PasswordChange(BaseModel):
-    current_password: str
-    new_password: str
+    """Schema for password change requests."""
+    current_password: str = Field(..., description="The user's current password for verification.")
+    new_password: str = Field(..., description="The new strong password to set.")
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    """Schema for manual login requests (non-OAuth2)."""
+    username: str = Field(..., description="The user's username.")
+    password: str = Field(..., description="The user's password.")
 
 @dataclass
 class SecurityEvent:

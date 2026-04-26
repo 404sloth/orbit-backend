@@ -117,12 +117,15 @@ except Exception as e:
 
 
 # Authentication endpoints
-@app.post("/auth/login", response_model=Token)
+@app.post("/auth/login", response_model=Token, tags=["Authentication"], summary="User Login", description="Authenticates a user with username and password, returning a JWT access token and refresh token.")
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends()
 ):
-    """Login endpoint with enhanced security."""
+    """
+    Login endpoint with enhanced security.
+    Validates credentials and generates secure JWT tokens.
+    """
     user = authenticate_user(form_data.username, form_data.password, request)
     if not user:
         raise HTTPException(
@@ -149,9 +152,12 @@ async def login(
     )
 
 
-@app.post("/auth/register", response_model=UserBase)
+@app.post("/auth/register", response_model=UserBase, tags=["Authentication"], summary="Register New User", description="Creates a new user account with the provided details.")
 async def register(user_data: UserCreate):
-    """Register a new user with validation."""
+    """
+    Register a new user with validation.
+    Ensures username and email uniqueness and enforces password strength policies.
+    """
     try:
         user = create_user(user_data)
         return UserBase(
@@ -170,9 +176,9 @@ async def register(user_data: UserCreate):
         )
 
 
-@app.get("/auth/me", response_model=UserBase)
+@app.get("/auth/me", response_model=UserBase, tags=["Authentication"], summary="Get Current User", description="Retrieves the profile information of the currently authenticated user.")
 async def get_current_user_profile(current_user: UserInDB = Depends(get_current_active_user)):
-    """Get current user profile."""
+    """Get current user profile from the active session."""
     return UserBase(
         username=current_user.username,
         email=current_user.email,
@@ -181,12 +187,15 @@ async def get_current_user_profile(current_user: UserInDB = Depends(get_current_
     )
 
 
-@app.post("/auth/change-password")
+@app.post("/auth/change-password", tags=["Authentication"], summary="Change Password", description="Updates the password for the currently authenticated user.")
 async def change_password_endpoint(
     password_data: PasswordChange,
     current_user: UserInDB = Depends(get_current_active_user)
 ):
-    """Change user password."""
+    """
+    Change user password.
+    Requires the current password for verification before setting the new password.
+    """
     if not change_password(current_user.username, password_data.current_password, password_data.new_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -196,9 +205,12 @@ async def change_password_endpoint(
     return {"message": "Password changed successfully"}
 
 
-@app.post("/auth/refresh", response_model=Token)
+@app.post("/auth/refresh", response_model=Token, tags=["Authentication"], summary="Refresh Access Token", description="Generates a new JWT access token using a valid refresh token.")
 async def refresh_access_token(request: RefreshTokenRequest):
-    """Refresh access token using refresh token."""
+    """
+    Refresh access token using refresh token.
+    Extends the user's session without requiring re-authentication.
+    """
     try:
         payload = jwt.decode(request.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -239,7 +251,7 @@ async def refresh_access_token(request: RefreshTokenRequest):
         )
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat", response_model=ChatResponse, tags=["Chat"], summary="Sync Chat", description="Sends a prompt to the multi-agent system and waits for a complete response.")
 async def chat_endpoint(request: ChatRequest):
     """
     Main chat endpoint. Accepts a prompt and optional thread_id,
@@ -361,10 +373,11 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 
-@app.post("/chat/stream")
+@app.post("/chat/stream", tags=["Chat"], summary="Streaming Chat", description="Initiates a streaming chat session for real-time AI reasoning and responses.")
 async def chat_stream_endpoint(request: ChatRequest):
     """
     Streaming chat endpoint for real-time trace reasoning.
+    Provides Server-Sent Events (SSE) for incremental updates.
     """
     thread_id = request.thread_id or str(uuid.uuid4())
     create_thread(thread_id)
@@ -499,8 +512,9 @@ async def chat_stream_endpoint(request: ChatRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@app.post("/chat/threads", response_model=ChatThread)
+@app.post("/chat/threads", response_model=ChatThread, tags=["Chat"], summary="Create Chat Thread", description="Initializes a new conversation thread and returns its unique ID.")
 async def create_chat_thread() -> ChatThread:
+    """Creates a new unique chat thread for tracking conversation history."""
     thread_id = str(uuid.uuid4())
     create_thread(thread_id)
     return ChatThread(
@@ -512,8 +526,9 @@ async def create_chat_thread() -> ChatThread:
     )
 
 
-@app.get("/chat/threads", response_model=List[ChatThread])
+@app.get("/chat/threads", response_model=List[ChatThread], tags=["Chat"], summary="List Chat Threads", description="Retrieves a list of all chat threads for the current system.")
 async def list_chat_threads() -> List[ChatThread]:
+    """Lists all available chat threads with their metadata and message counts."""
     rows = get_chat_threads()
     return [
         ChatThread(
@@ -527,8 +542,9 @@ async def list_chat_threads() -> List[ChatThread]:
     ]
 
 
-@app.get("/chat/history/{thread_id}", response_model=List[ChatHistoryItem])
+@app.get("/chat/history/{thread_id}", response_model=List[ChatHistoryItem], tags=["Chat"], summary="Get Chat History", description="Retrieves the full message history for a specific conversation thread.")
 async def get_chat_history_endpoint(thread_id: str) -> List[ChatHistoryItem]:
+    """Fetches all previous messages and associated metadata for the given thread ID."""
     if not thread_exists(thread_id):
         raise HTTPException(status_code=404, detail="Chat thread not found")
     rows = get_chat_history(thread_id)
@@ -543,11 +559,11 @@ async def get_chat_history_endpoint(thread_id: str) -> List[ChatHistoryItem]:
     ]
 
 
-@app.post("/kb/documents")
+@app.post("/kb/documents", tags=["Knowledge Base"], summary="Ingest Document", description="Uploads a file or provides text content to be added to the RAG knowledge base.")
 async def ingest_knowledge(
-    content: Optional[str] = Form(None),
-    source: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
+    content: Optional[str] = Form(None, description="The raw text content to ingest."),
+    source: Optional[str] = Form(None, description="The source label for the document."),
+    file: Optional[UploadFile] = File(None, description="A file to upload and parse for knowledge ingestion."),
 ):
     """
     Ingest knowledge from either a text payload or an uploaded file.
@@ -587,17 +603,18 @@ async def ingest_knowledge(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/chat/threads/{thread_id}")
+@app.delete("/chat/threads/{thread_id}", tags=["Chat"], summary="Delete Chat Thread", description="Permanently deletes a chat thread and all its associated message history.")
 async def delete_chat_thread_endpoint(thread_id: str):
+    """Removes the specified thread and all stored messages from the database."""
     if not thread_exists(thread_id):
         raise HTTPException(status_code=404, detail="Chat thread not found")
     delete_chat_thread(thread_id)
     return {"detail": "Chat thread deleted"}
 
 
-@app.get("/dashboard/projects")
+@app.get("/dashboard/projects", tags=["Dashboard"], summary="List Projects", description="Retrieves a list of all active projects for the Pulse dashboard.")
 async def get_dashboard_projects():
-    """Fetch projects for the Pulse page."""
+    """Fetch projects for the Pulse page with status and metrics."""
     try:
         return get_all_projects()
     except Exception as e:
@@ -605,9 +622,9 @@ async def get_dashboard_projects():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/dashboard/projects/{project_id}/timeline")
+@app.get("/dashboard/projects/{project_id}/timeline", tags=["Dashboard"], summary="Get Project Timeline", description="Retrieves a unified timeline of events, milestones, and updates for a specific project.")
 async def get_dashboard_timeline(project_id: str):
-    """Fetch unified timeline for a project."""
+    """Fetch unified timeline for a project, sorted by date."""
     try:
         return get_project_timeline(project_id)
     except Exception as e:
@@ -615,17 +632,17 @@ async def get_dashboard_timeline(project_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/dashboard/projects/{project_id}/simulate-full-lifecycle")
+@app.post("/dashboard/projects/{project_id}/simulate-full-lifecycle", tags=["Dashboard"], summary="Simulate Project Lifecycle", description="Triggers a simulation that progresses a project through various lifecycle stages.")
 async def simulate_project_lifecycle(project_id: str):
-    """Simulate a project progressing through its lifecycle."""
+    """Simulate a project progressing through its lifecycle for demonstration purposes."""
     # In a real app, this would trigger agent actions.
     # For now, we'll just return a success message.
     return {"message": f"Simulation started for project {project_id}"}
 
 
-@app.get("/dashboard/notifications")
+@app.get("/dashboard/notifications", tags=["Dashboard"], summary="Get Notifications", description="Retrieves all pending notifications and meeting transcript alerts.")
 async def get_dashboard_notifications_endpoint():
-    """Fetch pending meeting notifications."""
+    """Fetch pending meeting notifications and suggested actions."""
     try:
         return get_pending_notifications()
     except Exception as e:
@@ -633,9 +650,9 @@ async def get_dashboard_notifications_endpoint():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/dashboard/notifications/{transcript_id}/action")
-async def handle_notification_action(transcript_id: int, action: str = Body(..., embed=True)):
-    """Handle actions on notifications (e.g., 'DONE' for Make RFP, 'REJECTED' for Reject)."""
+@app.post("/dashboard/notifications/{transcript_id}/action", tags=["Dashboard"], summary="Handle Notification Action", description="Applies a specific action (e.g., 'DONE', 'REJECTED') to a pending notification.")
+async def handle_notification_action(transcript_id: int, action: str = Body(..., embed=True, description="The action to take on the notification (e.g., 'make_rfp', 'reject').")):
+    """Handle actions on notifications and update their status accordingly."""
     try:
         status = "DONE" if action == "make_rfp" else "REJECTED"
         success = update_notification_status(transcript_id, status)
@@ -647,9 +664,9 @@ async def handle_notification_action(transcript_id: int, action: str = Body(...,
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/chat/suggestions/{thread_id}")
+@app.get("/chat/suggestions/{thread_id}", tags=["Chat"], summary="Get Chat Suggestions", description="Generates dynamic follow-up questions or suggestions based on the current chat context.")
 async def get_chat_suggestions_endpoint(thread_id: str):
-    """Fetch dynamic suggestions for the current thread."""
+    """Fetch dynamic suggestions for the current thread to guide the user."""
     try:
         return get_dynamic_suggestions(thread_id)
     except Exception as e:
@@ -657,11 +674,11 @@ async def get_chat_suggestions_endpoint(thread_id: str):
         return ["What is the current status?", "Show latest milestones.", "Check project budget."]
 
 
-@app.get("/reports/download/{filename}")
+@app.get("/reports/download/{filename}", tags=["Reports"], summary="Download Report", description="Serves a generated report file (Excel, PDF, or image) for download.")
 async def download_report(filename: str):
     """
     Serves a generated Excel or image report file.
-    Includes security checks to prevent path traversal.
+    Includes security checks to prevent path traversal and unauthorized access.
     """
     # Prevent path traversal
     if ".." in filename or filename.startswith("/") or filename.startswith("\\"):

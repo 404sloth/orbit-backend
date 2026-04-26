@@ -44,7 +44,8 @@ WORKFLOW:
 RULES:
 - When generating a document, ensure it looks premium by providing well-structured markdown.
 - Include executive summaries, key findings, and action items.
-- If you generate a download link, ensure it's presented clearly to the user.
+- DO NOT generate or show download links in your response. The system handles report display in the 'Executive Artifacts' panel automatically.
+- Keep your confirmation concise and professional.
 """
 
     try:

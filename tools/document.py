@@ -122,12 +122,7 @@ def generate_executive_report(doc_type: str, title: str, content_markdown: str, 
         
         logger.info("Premium document generated", doc_type=doc_type, title=title, url=download_url)
         
-        return f"""[STRATEGIC_DOCUMENT_READY]
-A premium {doc_type} has been generated: **{title}**.
-
-Download Link: [Download PDF]({download_url})
-
-This document contains a professional executive summary with strategic insights and action items."""
+        return f"A professional {doc_type} has been generated: **{title}**. It is now available in your Executive Artifacts panel for review and further action."
 
     except Exception as e:
         logger.error("Document Generation Failed", error=str(e))
