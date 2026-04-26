@@ -7,10 +7,19 @@ from pydantic import field_validator
 
 
 class Settings(BaseSettings):
-    # LLM Settings
+    # LLM Provider: 'groq' or 'openai'
+    llm_provider: str = "groq"
+    
+    # API Keys
     groq_api_key: str = ""
-    primary_model: str = "llama-3.1-70b-versatile"
-    fallback_model: str = "deepseek-r1"
+    openai_api_key: str = ""
+    
+    # Models
+    groq_model: str = "llama-3.1-70b-versatile"
+    openai_model: str = "gpt-4o"
+    ollama_model: str = "llama3.1"
+    
+    # Fallback & Infrastructure
     ollama_base_url: str = "http://localhost:11434"
 
     # Database
@@ -27,14 +36,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    @field_validator("groq_api_key")
+    @field_validator("llm_provider")
     @classmethod
-    def groq_key_must_exist(cls, v: str) -> str:
-        if not v or v.strip() == "":
-            raise ValueError(
-                "GROQ_API_KEY is required. Set it in .env or as an environment variable."
-            )
-        return v
+    def validate_provider(cls, v: str) -> str:
+        if v.lower() not in ["groq", "openai"]:
+            return "groq"
+        return v.lower()
 
 settings = Settings()
 

@@ -10,6 +10,8 @@ langgraph==0.4.5
 langsmith==0.1.147
 langchain-community==0.2.19
 langchain-groq==0.1.10
+langchain-openai==0.1.25
+fpdf2==2.8.2
 
 # Configuration & Utilities
 pydantic-settings==2.2.1
