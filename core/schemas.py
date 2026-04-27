@@ -63,6 +63,7 @@ class AddDocumentsSchema(BaseModel):
     )
 
 
+
 class GenerateReportSchema(BaseModel):
     """Schema for the generate_executive_report tool."""
     doc_type: str = Field(
@@ -77,6 +78,10 @@ class GenerateReportSchema(BaseModel):
     )
     content_markdown: str = Field(
         description="The full content of the document in Markdown format. Use headings (#) for sections."
+    )
+    format: str = Field(
+        default="PDF",
+        description="The output format of the report. Must be one of ['PDF', 'DOCX', 'EXCEL']."
     )
 
 # ========================== API Schemas ==========================

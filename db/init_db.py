@@ -333,7 +333,7 @@ Anita: That conflicts with the month‑end close. Can we start on a Friday 6 PM 
 Sarah: Yes, we can schedule it for May 16–18.
 Michael: Good. Let''s lock that in. Next meeting we do a dry run of the rollback procedure.',
      'Kickoff detailed cutover planning. Key actions: CloudForge to deliver IP lists for RFC by Thursday; HR data cleansing rules sign‑off by Monday; finance migration scheduled for May 16–18 weekend.',
-     'DONE', 'Kickoff'),
+     'Pending', 'Kickoff'),
 
     (2, 1, '2025-05-20 14:00:00',
      'Sarah (CloudForge): We completed the core data migration last night. 13 out of 14 tables passed validation. The purchase_order_line_items table had 0.3% row count mismatch.
@@ -345,7 +345,7 @@ Anita: When can we start integration testing?
 Sarah: We''ll have the staging environment ready by Monday. I''ll send out a shared test plan with 220 scenarios. We''ll need at least two business users for UAT by June 10.
 Michael: I''ll assign Susan from Finance and Mike from Supply Chain. Let''s aim for a full dress rehearsal on June 20.',
      'Data migration validation: 13/14 tables passed. 412 rows from purchase_order_line_items excluded due to legacy supplier FK. Load tests passed; connection pool leak fixed. Next: staging env ready Monday, UAT June 10, dress rehearsal June 20.',
-     'DONE', 'Status Update'),
+     'Pending', 'Status Update'),
 
     (3, 2, '2025-03-20 15:00:00',
      'Dr. Lisa Abernathy (Wellspring): We need the portal to be fully accessible. Our patient population includes many elderly and visually impaired users. WCAG 2.1 AA is the floor, not the ceiling.
@@ -358,7 +358,7 @@ Tom: We''ll use FHIR R4 APIs. We''ve already built a sandbox integration with sy
 Elena: We need a Business Associate Agreement (BAA) signed before any live data flows.
 Tom: Understood. Our legal team will send the draft by Friday.',
      'Deep dive on accessibility (WCAG 2.1 AA + 7:1 contrast), PHI audit trail (immutable logs), FHIR integration with Epic EHR. BAA draft scheduled for Friday. Demo of FHIR sandbox next week.',
-     'DONE', 'Requirements'),
+     'Pending', 'Requirements'),
 
     (4, 2, '2025-04-02 11:00:00',
      'Tom (PixelByte): We reviewed the RFP responses – two shops bid, but only CloudForge and DataPulse expressed interest. DataPulse proposed an AI‑powered triage feature.
@@ -369,7 +369,7 @@ Dr. Abernathy: That''s a red flag. We can''t engage without full compliance docu
 Tom: Agreed. That leaves CloudForge as the front‑runner, but they didn''t include AI features. We could partner for the base portal and later integrate a separate AI module.
 Elena: Let''s shortlist CloudForge and set a final clarification call. If DataPulse can deliver the HITRUST report within two weeks, they stay in. Otherwise, we move forward without AI for now.',
      'Bid review: AI triage proposal by DataPulse promising but lacks HITRUST; must deliver documentation in two weeks. CloudForge shortlisted for core portal. Decision deferred for regulatory check on FDA classification.',
-     'DONE', 'Vendor Evaluation'),
+     'Pending', 'Vendor Evaluation'),
 
     (5, 3, '2025-06-18 09:30:00',
      'Arjun Mehta (NovaLogic): Our main pain point is model deployment. Data scientists wait weeks to get a REST endpoint. We need self‑service with guardrails.
@@ -382,7 +382,7 @@ Carlos: Can it handle streaming inference?
 Priya: Yes, we''ll use Kafka for ingestion and gRPC for model serving, which gives us sub‑50ms latency. We can even do A/B testing with traffic splitting.
 Arjun: That sounds promising. Let''s schedule a technical deep‑dive on the serving architecture for next week.',
      'Requirements for self‑service MLOps, GPU scheduling with Kueue, GDPR data residency (Frankfurt), streaming inference via Kafka/gRPC. PoC goal: 10k req/min benchmark. Deep‑dive scheduled.',
-     'DONE', 'Technical Review'),
+     'Pending', 'Technical Review'),
 
     (6, 3, '2025-07-08 14:00:00',
      'Arjun Mehta: We received the bids. DataPulse came in at $980k, CloudForge at $1.05M, and Nebula at $1.025M. Nebula''s architecture is Snowflake‑heavy, which might not suit our real‑time ML needs.

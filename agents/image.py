@@ -42,112 +42,126 @@ def image_node(state: GraphState, config: Dict[str, Any]) -> dict:
                 row_html = "".join([f"<td>{row.get(h, '')}</td>" for h in headers_list])
                 rows_html += f"<tr>{row_html}</tr>"
             
-            # Premium HTML Template with Indigo/Glass theme
+
+
+            # Premium HTML Template with Executive Light theme
             html_content = f"""
             <html>
             <head>
-            <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
             <style>
                 body {{ 
-                    font-family: 'Outfit', sans-serif; 
+                    font-family: 'Inter', sans-serif; 
                     margin: 0; 
-                    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); 
+                    background: #f1f5f9; 
                     display: flex; 
                     justify-content: center; 
-                    padding: 40px;
+                    padding: 8px;
                 }}
                 .report-card {{ 
-                    background: rgba(255, 255, 255, 0.03); 
-                    backdrop-filter: blur(10px); 
-                    border: 1px solid rgba(255, 255, 255, 0.1); 
-                    padding: 40px; 
-                    border-radius: 24px; 
+                    background: #ffffff; 
+                    border: 1px solid #e2e8f0; 
+                    padding: 30px; 
+                    border-radius: 12px; 
                     width: 1000px;
-                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
+                    position: relative;
                 }}
                 .header {{ 
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.1); 
-                    padding-bottom: 20px; 
-                    margin-bottom: 30px; 
+                    border-bottom: 2px solid #f1f5f9; 
+                    padding-bottom: 15px; 
+                    margin-bottom: 20px; 
                     display: flex; 
                     justify-content: space-between; 
-                    align-items: flex-end;
+                    align-items: center;
                 }}
                 .title-area h1 {{ 
-                    color: #fff; 
+                    color: #0f172a; 
                     margin: 0; 
-                    font-size: 28px; 
+                    font-size: 24px; 
                     font-weight: 600; 
                     letter-spacing: -0.5px;
                 }}
                 .title-area p {{ 
-                    color: #94a3b8; 
-                    margin: 5px 0 0 0; 
-                    font-size: 14px; 
+                    color: #c5a572; 
+                    margin: 2px 0 0 0; 
+                    font-size: 11px; 
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 1.5px;
                 }}
                 .page-badge {{ 
-                    background: #6366f1; 
-                    color: white; 
-                    padding: 4px 12px; 
-                    border-radius: 100px; 
-                    font-size: 12px; 
+                    background: #f8fafc; 
+                    color: #64748b; 
+                    padding: 6px 12px; 
+                    border-radius: 6px; 
+                    font-size: 10px; 
                     font-weight: 600; 
+                    border: 1px solid #e2e8f0;
                 }}
                 table {{ 
-                    border-collapse: separate; 
-                    border-spacing: 0; 
                     width: 100%; 
-                    color: #e2e8f0;
+                    border-collapse: collapse;
+                    color: #334155;
                 }}
                 th {{ 
                     text-align: left; 
-                    padding: 12px 16px; 
-                    font-size: 11px; 
-                    color: #818cf8; 
+                    padding: 10px 12px; 
+                    font-size: 10px; 
+                    color: #64748b; 
                     font-weight: 600; 
+                    text-transform: uppercase;
                     letter-spacing: 1px; 
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                    background: #f8fafc;
+                    border-bottom: 1px solid #e2e8f0;
                 }}
                 td {{ 
-                    padding: 14px 16px; 
-                    font-size: 14px; 
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.05); 
+                    padding: 12px 12px; 
+                    font-size: 13px; 
+                    border-bottom: 1px solid #f1f5f9; 
                 }}
                 tr:last-child td {{ border-bottom: none; }}
-                tr:hover {{ background: rgba(255, 255, 255, 0.02); }}
+                tr:nth-child(even) {{ background: #fafafa; }}
                 .footer {{ 
                     margin-top: 30px; 
-                    font-size: 11px; 
-                    color: #475569; 
+                    font-size: 10px; 
+                    color: #94a3b8; 
                     display: flex; 
                     justify-content: space-between; 
+                    padding-top: 15px;
+                    border-top: 1px solid #f1f5f9;
                 }}
                 .summary-stats {{
                     display: flex;
                     gap: 20px;
-                    margin-bottom: 20px;
+                    margin-bottom: 25px;
                 }}
                 .stat-box {{
-                    background: rgba(255, 255, 255, 0.02);
-                    padding: 12px 20px;
-                    border-radius: 12px;
-                    border: 1px solid rgba(255, 255, 255, 0.05);
+                    flex: 1;
+                    background: #f8fafc;
+                    padding: 15px;
+                    border-radius: 8px;
+                    border: 1px solid #e2e8f0;
                 }}
-                .stat-label {{ font-size: 10px; color: #64748b; text-transform: uppercase; }}
-                .stat-value {{ font-size: 16px; color: #f8fafc; font-weight: 600; }}
+                .stat-label {{ font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }}
+                .stat-value {{ font-size: 18px; color: #0f172a; font-weight: 600; }}
             </style>
             </head>
             <body>
             <div class="report-card">
                 <div class="header">
                     <div class="title-area">
-                        <h1>Executive Report</h1>
-                        <p>{title}</p>
+                        <p>Executive Strategic Insight</p>
+                        <h1>Data Intelligence Report</h1>
                     </div>
-                    <div class="page-badge">PAGE {p_idx + 1} OF {len(pages)}</div>
+                    <div class="page-badge">SECURE DATA VIEW | PAGE {p_idx + 1} OF {len(pages)}</div>
                 </div>
                 
                 <div class="summary-stats">
+                    <div class="stat-box">
+                        <div class="stat-label">Analysis Subject</div>
+                        <div class="stat-value">{title[:40]}</div>
+                    </div>
                     <div class="stat-box">
                         <div class="stat-label">Total Records</div>
                         <div class="stat-value">{len(data)}</div>
@@ -164,8 +178,8 @@ def image_node(state: GraphState, config: Dict[str, Any]) -> dict:
                 </table>
                 
                 <div class="footer">
-                    <span>Generated by Orbit Intelligence Platform</span>
-                    <span>Confidential • {time.strftime("%H:%M:%S UTC")}</span>
+                    <span>ORBIT | Strategic Intelligence Engine</span>
+                    <span>CONFIDENTIAL • {time.strftime("%H:%M UTC")}</span>
                 </div>
             </div>
             </body>

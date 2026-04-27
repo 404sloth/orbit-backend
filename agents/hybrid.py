@@ -33,27 +33,41 @@ def hybrid_node(state: GraphState) -> dict:
         generate_executive_report,
     ]
 
-    # Retrieve dynamic schema context for SQL
+
+    # Retrieve dynamic schema summary (reduced size for TPM limits)
     table_names = get_table_names()
-    schema_context = get_bcnf_schema(table_names)
+    tables_list = ", ".join(table_names)
 
     sys_msg = f"""You are the Strategic Intelligence Agent for an executive dashboard.
 Your job is to provide deep, comprehensive answers by combining structured data (SQL) 
 with unstructured context (RAG/Meeting Transcripts).
 
-DATABASE SCHEMA (SQL):
-{schema_context}
+DATABASE CONTEXT:
+The database contains the following tables: [{tables_list}].
+Use 'describe_table_schema' to see column details for specific tables before querying.
+
+CORE TABLES FOR STATUS:
+- projects: Project names and overall status.
+- milestones: Detailed delivery schedule and status.
+- vendor_bids / rfp_documents: For procurement status.
 
 AVAILABLE TOOLS:
 1. SQL: list_database_tables, describe_table_schema, execute_read_query.
-2. RAG: search_project_documents.
-3. DASHBOARD: cache_dashboard_metric (use to flag critical risks/milestones).
-4. DOCUMENTS: generate_executive_report (use to create premium PDFs of your findings).
+2. RAG: search_project_documents (meetings, transcripts, RFPs).
+3. DASHBOARD: cache_dashboard_metric (flag critical risks/milestones).
+4. DOCUMENTS: generate_executive_report (create premium PDFs).
+
+STRICT TOOL CALLING RULES:
+- Use ONLY standard ASCII straight double-quotes (") for JSON keys and strings.
+- NEVER use curly quotes (“ or ”).
+- NEVER wrap tool calls in XML-like tags like <function=...>. 
+- Ensure all JSON is perfectly formatted.
 
 WORKFLOW:
-1. JOINT ANALYSIS: For any question about "status" or "meetings", use BOTH sources.
-2. SYNTHESIZE: Combine findings into a single informative response.
-3. DOCUMENTATION: If the user asks for a 'document', 'PDF', or 'formal summary', use generate_executive_report.
+1. EXPLORE: If you don't know the columns, use 'describe_table_schema' FIRST.
+2. JOINT ANALYSIS: For any question about "status" or "meetings", use BOTH SQL and RAG.
+3. SYNTHESIZE: Combine findings into a single informative response.
+4. DOCUMENTATION: If the user asks for a 'document', 'PDF', or 'formal summary', use generate_executive_report.
 """
 
     try:
