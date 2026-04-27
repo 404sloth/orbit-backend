@@ -56,6 +56,7 @@ from core.parsers import get_parser_for_filename
 from tools.rag import add_documents_to_knowledge_base
 from core.session import init_reports_dir, cleanup_old_reports, REPORTS_TEMP_DIR
 from db.dashboard import get_all_projects, get_project_timeline, get_pending_notifications, update_notification_status
+from db.audit import get_access_gaps
 from db.suggestions import get_dynamic_suggestions
 import os
 
@@ -672,6 +673,16 @@ async def get_chat_suggestions_endpoint(thread_id: str):
     except Exception as e:
         logger.error(f"Failed to fetch suggestions: {e}")
         return ["What is the current status?", "Show latest milestones.", "Check project budget."]
+
+
+@app.get("/audit/access-gaps", tags=["Audit"], summary="Get Access Gaps", description="Retrieves all detected security access anomalies and redundant permissions.")
+async def get_audit_access_gaps():
+    """Fetch all access gaps for the Access Guard page."""
+    try:
+        return get_access_gaps()
+    except Exception as e:
+        logger.error(f"Failed to fetch access gaps: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/reports/download/{filename}", tags=["Reports"], summary="Download Report", description="Serves a generated report file (Excel, PDF, or image) for download.")

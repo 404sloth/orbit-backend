@@ -189,6 +189,27 @@ CREATE TABLE IF NOT EXISTS security_events (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS permissions (
+    permission_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    permission_name TEXT UNIQUE NOT NULL,
+    description     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS access_gaps (
+    gap_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    project_id      INTEGER NOT NULL,
+    permission_id   INTEGER NOT NULL,
+    reason          TEXT,
+    severity        TEXT CHECK(severity IN ('high', 'medium', 'low')) DEFAULT 'medium',
+    status          TEXT CHECK(status IN ('flagged', 'resolved', 'ignored')) DEFAULT 'flagged',
+    last_active     TIMESTAMP,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (project_id) REFERENCES projects(project_id),
+    FOREIGN KEY (permission_id) REFERENCES permissions(permission_id)
+);
+
 -- ===================== DASHBOARD CACHE =====================
 
 CREATE TABLE IF NOT EXISTS dashboard_metrics (
@@ -210,9 +231,12 @@ CREATE TABLE IF NOT EXISTS milestone_tasks (
 
 SEED_DATA = """
 -- ===== USERS =====
-INSERT OR IGNORE INTO users (username, email, hashed_password, role, is_active, is_verified)
+INSERT OR IGNORE INTO users (user_id, username, email, hashed_password, role, is_active, is_verified)
 VALUES
-    ('admin', 'admin@h-copilot.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6fM9q7F6e', 'ADMIN', 1, 1);  -- password: admin123
+    (1, 'admin', 'admin@h-copilot.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6fM9q7F6e', 'ADMIN', 1, 1),
+    (2, 'sarah_whitman', 'sarah.w@greenfield.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6fM9q7F6e', 'USER', 1, 1),
+    (3, 'marcus_chen', 'm.chen@cloudforge.io', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6fM9q7F6e', 'ANALYST', 1, 1),
+    (4, 'elena_rodriguez', 'elena.r@wellspring.health', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6fM9q7F6e', 'USER', 1, 1);
 
 -- ===== CLIENTS =====
 INSERT OR IGNORE INTO clients (client_id, company_name, contact_person, industry)
@@ -418,6 +442,23 @@ VALUES
     (1, 'LOGIN_SUCCESS', 'admin', '192.168.1.10', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 'Successful login from internal network.', '2025-04-25T08:00:00'),
     (2, 'LOGIN_FAILURE', 'admin', '203.0.113.42', 'python-requests/2.31.0', 'Failed login attempt – incorrect password.', '2025-04-25T09:45:00'),
     (3, 'PASSWORD_CHANGE', 'admin', '192.168.1.10', 'Mozilla/5.0', 'Admin password changed successfully.', '2025-04-25T10:00:00');
+
+-- ===== PERMISSIONS =====
+INSERT OR IGNORE INTO permissions (permission_id, permission_name, description)
+VALUES
+    (1, 'Financial Ledger Write', 'Ability to modify accounting ledgers and journals.'),
+    (2, 'Production DB Admin', 'Full administrative access to production database clusters.'),
+    (3, 'HR PII Access', 'Access to sensitive employee Personally Identifiable Information.'),
+    (4, 'Cloud Infrastructure Edit', 'Modify cloud resources (EC2, S3, RDS).'),
+    (5, 'Strategy Document Read', 'View internal strategic planning and roadmap documents.');
+
+-- ===== ACCESS GAPS =====
+INSERT OR IGNORE INTO access_gaps (user_id, project_id, permission_id, reason, severity, status, last_active)
+VALUES
+    (2, 4, 1, 'Project Phoenix marked as ''Completed'' on April 12. User still retains write access to financial modules.', 'high', 'flagged', '2025-04-25 14:20:00'),
+    (3, 1, 2, 'User re-assigned to ''Project Orbit''. Phoenix ERP production admin access no longer required by policy.', 'medium', 'flagged', '2025-04-27 09:15:00'),
+    (4, 2, 3, 'Temporary access for Legacy Audit expired on April 20. PII access remains active in IAM.', 'high', 'flagged', '2025-04-20 18:00:00'),
+    (1, 5, 4, 'Executive oversight access granted during discovery phase. Phase completed, access should be restricted.', 'low', 'flagged', '2025-04-26 11:30:00');
 
 -- ===== DASHBOARD METRICS =====
 INSERT OR IGNORE INTO dashboard_metrics (metric_id, metric_key, status, reason, updated_at)
