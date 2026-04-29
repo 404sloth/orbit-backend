@@ -4,6 +4,7 @@ Refactored as a ReAct agent for multi-tool orchestration.
 """
 import pathlib
 from langgraph.prebuilt import create_react_agent
+from langchain_core.runnables import RunnableConfig
 from core.factory import get_llm
 from core.state import GraphState
 from core.logger import logger
@@ -11,7 +12,7 @@ from db.schema import get_bcnf_schema, get_table_names
 from tools.sql import execute_read_query
 from tools.document import generate_executive_report
 
-def report_node(state: GraphState) -> dict:
+def report_node(state: GraphState, config: RunnableConfig) -> dict:
     """
     Report Agent node. Uses ReAct agent to decide between 
     SQL queries and PDF document generation.
@@ -28,8 +29,12 @@ def report_node(state: GraphState) -> dict:
 
 
 
+    username = config.get("configurable", {}).get("username", "Executive")
+
     sys_msg = f"""You are the Executive Report Agent. 
 Your job is to generate professional documents (PDF, DOCX) or data spreadsheets (Excel).
+
+CURRENT USER: {username}
 
 CAPABILITIES:
 1. SQL: Use execute_read_query to fetch data from the database.
@@ -50,8 +55,8 @@ WORKFLOW:
 3. For PDF/DOCX, provide RICH and DETAILED content_markdown.
 
 RULES:
-- DO NOT generate or show download links in your response. The system handles it.
 - Include executive summaries, key findings, and action items.
+- Always include the download link provided by the tool in your final response so it appears in the Executive Artifacts panel.
 - Keep your confirmation concise and professional.
 """
 

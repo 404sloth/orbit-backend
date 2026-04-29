@@ -23,8 +23,8 @@ from core.session import REPORTS_TEMP_DIR
 class ExecutivePDF(FPDF):
     def __init__(self):
         super().__init__()
-        self.set_margins(25, 25, 25)
-        self.set_auto_page_break(auto=True, margin=25)
+        self.set_margins(20, 20, 20)
+        self.set_auto_page_break(auto=True, margin=20)
 
     def header(self):
         if self.page_no() == 1:
@@ -39,7 +39,7 @@ class ExecutivePDF(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font("helvetica", "I", 8)
-        self.set_text_color(203, 213, 225) # Dim Slate 300
+        self.set_text_color(226, 232, 240) # Even dimmer Slate 200
         date_str = datetime.datetime.now().strftime("%d %b %Y %H:%M")
         self.cell(0, 10, f"Page {self.page_no()}/{{nb}}  |  Generated: {date_str}", align="C")
 
@@ -49,7 +49,11 @@ def parse_markdown_table(markdown_block):
     table_data = []
     for line in lines:
         if "|" in line and "---" not in line:
-            cells = [c.strip() for c in line.split("|") if c.strip()]
+            # Handle outer pipes correctly
+            line = line.strip()
+            if line.startswith("|"): line = line[1:]
+            if line.endswith("|"): line = line[:-1]
+            cells = [c.strip() for c in line.split("|")]
             if cells: table_data.append(cells)
     return table_data
 
@@ -58,6 +62,10 @@ def generate_pdf(doc_type, title, subtitle, content_markdown, filepath):
     pdf = ExecutivePDF()
     pdf.alias_nb_pages()
     pdf.add_page()
+    
+    # Apply subtle premium background tint
+    pdf.set_fill_color(252, 252, 253) # Very light slate/white
+    pdf.rect(0, 0, 210, 297, "F")
     
     # 1. Title Section (Professional sizes)
     pdf.set_font("helvetica", "B", 20)
@@ -75,6 +83,10 @@ def generate_pdf(doc_type, title, subtitle, content_markdown, filepath):
     pdf.line(25, pdf.get_y(), 50, pdf.get_y())
     pdf.ln(8)
     
+    # Pre-process markdown: Replace backticks with subtle bold for better PDF look
+    import re
+    content_markdown = re.sub(r'`([^`]+)`', r'**\1**', content_markdown)
+    
     # 2. Content Processing
     # We split by double newlines to handle blocks (text vs tables)
     blocks = content_markdown.split("\n\n")
@@ -87,21 +99,33 @@ def generate_pdf(doc_type, title, subtitle, content_markdown, filepath):
         if "|" in block and "---" in block:
             table_data = parse_markdown_table(block)
             if table_data:
-                pdf.set_font("helvetica", "", 9)
+                pdf.set_font("helvetica", "", 8) # Smaller font for tables to prevent overflow
                 pdf.set_text_color(51, 65, 85)
-                with pdf.table(
-                    borders_layout="HORIZONTAL_LINES",
-                    cell_fill_color=(248, 250, 252),
-                    cell_fill_mode="ROWS",
-                    line_height=7,
-                    text_align="LEFT",
-                    width=pdf.epw
-                ) as table:
-                    for row in table_data:
-                        row_cells = table.row()
-                        for cell_text in row:
-                            row_cells.cell(cell_text)
-                pdf.ln(5)
+                
+                # Calculate columns to avoid "Not enough horizontal space" errors
+                # fpdf2's table() is powerful but sensitive to width
+                try:
+                    with pdf.table(
+                        borders_layout="HORIZONTAL_LINES",
+                        cell_fill_color=(248, 250, 252),
+                        cell_fill_mode="ROWS",
+                        line_height=6,
+                        text_align="LEFT",
+                        width=pdf.epw
+                    ) as table:
+                        for row in table_data:
+                            row_cells = table.row()
+                            for cell_text in row:
+                                # Clean cell text to prevent formatting issues
+                                clean_text = str(cell_text).strip()
+                                row_cells.cell(clean_text)
+                    pdf.ln(5)
+                except Exception as table_err:
+                    logger.warning(f"Table rendering fallback: {table_err}")
+                    # Fallback to simple text if table fails
+                    pdf.set_font("helvetica", "I", 8)
+                    pdf.multi_cell(0, 5, "[Table omitted due to layout constraints - data remains in structured history]")
+                    pdf.ln(5)
                 continue
 
         # B. Header Detection
@@ -131,7 +155,10 @@ def generate_pdf(doc_type, title, subtitle, content_markdown, filepath):
             pdf.set_font("helvetica", "", 10)
             pdf.set_text_color(71, 85, 105) # Slate 600
             # Use fpdf2 markdown support for bold/italic in bullets
-            pdf.multi_cell(0, 6, block, markdown=True)
+            try:
+                pdf.multi_cell(0, 6, block, markdown=True)
+            except Exception:
+                pdf.multi_cell(0, 6, block, markdown=False)
             pdf.ln(2)
             continue
 
@@ -140,7 +167,10 @@ def generate_pdf(doc_type, title, subtitle, content_markdown, filepath):
         pdf.set_text_color(71, 85, 105)
         # Handle backticks by replacing with subtle bolding or keeping as is if fpdf doesn't support code blocks
         # We use fpdf2's markdown support for **bold**, *italic*, and --strikethrough--
-        pdf.multi_cell(0, 6, block, markdown=True)
+        try:
+            pdf.multi_cell(0, 6, block, markdown=True)
+        except Exception:
+            pdf.multi_cell(0, 6, block, markdown=False)
         pdf.ln(2)
             
     pdf.output(filepath)
@@ -235,7 +265,7 @@ def generate_executive_report(doc_type: str, title: str, content_markdown: str, 
         download_url = f"http://localhost:8000/reports/download/{filename}"
         logger.info("Professional document generated", format=format, url=download_url)
         
-        return f"A professional {format} {doc_type} has been generated: **{title}**. It is now available in your Executive Artifacts panel."
+        return f"A professional {format} {doc_type} has been generated: **[{title}]({download_url})**. It is now available in your Executive Artifacts panel."
 
     except Exception as e:
         logger.error("Document Generation Failed", error=str(e))

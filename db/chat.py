@@ -38,17 +38,21 @@ def save_chat_message(thread_id: str, role: str, content: str, metadata: Optiona
         conn.commit()
 
 
-def get_chat_history(thread_id: str) -> List[Dict[str, any]]:
+def get_chat_history(thread_id: str, user_id: Optional[int] = None) -> List[Dict[str, any]]:
     with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT role, content AS message, created_at AS timestamp, metadata
-            FROM chat_messages
-            WHERE thread_id = ?
-            ORDER BY created_at ASC, message_id ASC
-            """,
-            (thread_id,),
-        ).fetchall()
+        query = """
+            SELECT m.role, m.content AS message, m.created_at AS timestamp, m.metadata
+            FROM chat_messages m
+            JOIN chat_threads t ON m.thread_id = t.thread_id
+            WHERE m.thread_id = ?
+        """
+        params = [thread_id]
+        if user_id is not None:
+            query += " AND t.user_id = ?"
+            params.append(user_id)
+        
+        query += " ORDER BY m.created_at ASC, m.message_id ASC"
+        rows = conn.execute(query, params).fetchall()
     
     results = []
     for row in rows:
@@ -66,10 +70,9 @@ def get_chat_history(thread_id: str) -> List[Dict[str, any]]:
     return results
 
 
-def get_chat_threads(limit: int = 50) -> List[Dict[str, Optional[str]]]:
+def get_chat_threads(limit: int = 50, user_id: Optional[int] = None) -> List[Dict[str, Optional[str]]]:
     with get_db_connection() as conn:
-        rows = conn.execute(
-            """
+        query = """
             SELECT
               t.thread_id,
               t.created_at,
@@ -79,11 +82,16 @@ def get_chat_threads(limit: int = 50) -> List[Dict[str, Optional[str]]]:
                 '') AS last_message,
               COALESCE((SELECT COUNT(*) FROM chat_messages WHERE thread_id = t.thread_id), 0) AS message_count
             FROM chat_threads t
-            ORDER BY t.updated_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        """
+        params = []
+        if user_id is not None:
+            query += " WHERE t.user_id = ?"
+            params.append(user_id)
+        
+        query += " ORDER BY t.updated_at DESC LIMIT ?"
+        params.append(limit)
+        
+        rows = conn.execute(query, params).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -94,10 +102,14 @@ def delete_chat_thread(thread_id: str) -> None:
         conn.commit()
 
 
-def thread_exists(thread_id: str) -> bool:
+def thread_exists(thread_id: str, user_id: Optional[int] = None) -> bool:
     with get_db_connection() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM chat_threads WHERE thread_id = ? LIMIT 1",
-            (thread_id,),
-        ).fetchone()
+        query = "SELECT 1 FROM chat_threads WHERE thread_id = ?"
+        params = [thread_id]
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        
+        query += " LIMIT 1"
+        row = conn.execute(query, params).fetchone()
     return row is not None

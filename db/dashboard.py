@@ -2,9 +2,9 @@ import sqlite3
 from typing import List, Dict, Any, Optional
 from db.client import get_db_connection
 
-def get_all_projects() -> List[Dict[str, Any]]:
+def get_all_projects(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Fetch all projects with their basic info and SOW dates.
+    Fetch all projects with their basic info and SOW dates, filtered by user.
     """
     with get_db_connection() as conn:
         query = """
@@ -31,7 +31,12 @@ def get_all_projects() -> List[Dict[str, Any]]:
             FROM projects p
             LEFT JOIN statements_of_work s ON p.project_id = s.project_id
         """
-        rows = conn.execute(query).fetchall()
+        params = []
+        if user_id is not None:
+            query += " WHERE p.user_id = ?"
+            params.append(user_id)
+            
+        rows = conn.execute(query, params).fetchall()
         
     projects = []
     for row in rows:
@@ -41,13 +46,19 @@ def get_all_projects() -> List[Dict[str, Any]]:
         projects.append(p)
     return projects
 
-def get_project_timeline(project_id: str) -> List[Dict[str, Any]]:
+def get_project_timeline(project_id: str, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Fetch a unified timeline of meetings and milestones for a project.
+    Fetch a unified timeline of meetings and milestones for a project, verified by user access.
     """
     timeline = []
     
     with get_db_connection() as conn:
+        # Security check: Ensure the project belongs to the user
+        if user_id is not None:
+            access_check = conn.execute("SELECT 1 FROM projects WHERE project_id = ? AND user_id = ?", (project_id, user_id)).fetchone()
+            if not access_check:
+                return []
+
         # Fetch Meetings
         meetings = conn.execute("""
             SELECT 
@@ -95,28 +106,36 @@ def get_project_timeline(project_id: str) -> List[Dict[str, Any]]:
                         tasks.append(f"{check} {desc}")
                 task_list = "\n".join(tasks)
                 d['summary'] = (d['summary'] or '') + "\n\nDeliverables:\n" + task_list
+                d.pop('tasks_raw', None) # Clean up raw data
             timeline.append(d)
             
     # Sort unified timeline by date descending
     timeline.sort(key=lambda x: x['date'] or '', reverse=True)
     return timeline
 
-def get_pending_notifications() -> List[Dict[str, Any]]:
+def get_pending_notifications(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Fetch meeting transcripts that are PENDING processing.
+    Fetch meeting transcripts that are PENDING processing, scoped to the user.
     """
     with get_db_connection() as conn:
-        rows = conn.execute("""
+        query = """
             SELECT 
-                transcript_id as id,
-                project_id,
-                meeting_date as date,
-                meeting_type as title,
-                cleaned_summary as summary
-            FROM meeting_transcripts
-            WHERE processing_status = 'PENDING'
-            ORDER BY meeting_date DESC
-        """).fetchall()
+                t.transcript_id as id,
+                t.project_id,
+                t.meeting_date as date,
+                t.meeting_type as title,
+                t.cleaned_summary as summary
+            FROM meeting_transcripts t
+            JOIN projects p ON t.project_id = p.project_id
+            WHERE t.processing_status = 'PENDING'
+        """
+        params = []
+        if user_id is not None:
+            query += " AND p.user_id = ?"
+            params.append(user_id)
+            
+        query += " ORDER BY t.meeting_date DESC"
+        rows = conn.execute(query, params).fetchall()
     return [dict(row) for row in rows]
 
 def update_notification_status(transcript_id: int, status: str) -> bool:

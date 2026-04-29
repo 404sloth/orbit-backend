@@ -17,6 +17,10 @@ class ExecuteQuerySchema(BaseModel):
             "Use JOINs for multi-table queries and WHERE for filtering."
         )
     )
+    user_id: Optional[int] = Field(
+        None,
+        description="The ID of the user performing the query. Automatically injected, do not provide manually."
+    )
 
 class CacheMetricSchema(BaseModel):
     """Schema for the cache_dashboard_metric tool."""
@@ -52,6 +56,14 @@ class SearchDocumentsSchema(BaseModel):
         default=3,
         description="Maximum number of relevant document chunks to return. MUST be an integer between 1 and 10. If a string is provided, it will be converted."
     )
+    scope: Optional[str] = Field(
+        default="global",
+        description="The scope of the search: 'global', 'workspace', or 'personal'."
+    )
+    user_id: Optional[int] = Field(
+        None,
+        description="The ID of the user performing the search (optional, used for personal scope)."
+    )
 
 class AddDocumentsSchema(BaseModel):
     """Schema for the add_documents_to_knowledge_base tool."""
@@ -61,9 +73,39 @@ class AddDocumentsSchema(BaseModel):
     source: str = Field(
         description="Descriptive source label for the document (e.g., 'Meeting Transcript - April 12')."
     )
+    scope: str = Field(
+        default="global",
+        description="The scope of the document: 'global', 'workspace', or 'personal'."
+    )
+    user_id: Optional[int] = Field(
+        None,
+        description="The ID of the user who owns the document (required for personal scope)."
+    )
+
+class KnowledgeSearchSchema(BaseModel):
+    """Schema for the hybrid_knowledge_search tool."""
+    query: str = Field(
+        description="A natural language query to search both structured project data (SQL) and unstructured documents (RAG)."
+    )
+    user_id: Optional[int] = Field(
+        None,
+        description="The ID of the current user. Automatically injected."
+    )
+    depth: str = Field(
+        default="balanced",
+        description="Search depth: 'fast' (metadata only), 'balanced' (metadata + RAG), or 'deep' (full SQL + RAG)."
+    )
 
 
-
+class SearchTranscriptsSchema(BaseModel):
+    """Schema for the search_meeting_transcripts tool."""
+    query: str = Field(
+        description="A name, topic, or keyword to search for within meeting transcripts."
+    )
+    user_id: Optional[int] = Field(
+        None,
+        description="The ID of the current user. Automatically injected."
+    )
 class GenerateReportSchema(BaseModel):
     """Schema for the generate_executive_report tool."""
     doc_type: str = Field(

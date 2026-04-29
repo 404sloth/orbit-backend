@@ -12,7 +12,7 @@ def get_vector_store() -> Chroma:
     """
     embeddings = OllamaEmbeddings(
         model="nomic-embed-text", 
-        base_url="http://localhost:11434"
+        base_url="http://127.0.0.1:11434"
     )
     
     return Chroma(

@@ -253,7 +253,7 @@ async def refresh_access_token(request: RefreshTokenRequest):
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["Chat"], summary="Sync Chat", description="Sends a prompt to the multi-agent system and waits for a complete response.")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, current_user: UserInDB = Depends(get_current_active_user)):
     """
     Main chat endpoint. Accepts a prompt and optional thread_id,
     routes through the multi-agent system, and returns the AI response.
@@ -267,7 +267,11 @@ async def chat_endpoint(request: ChatRequest):
     thread_id = request.thread_id or str(uuid.uuid4())
     create_thread(thread_id)
     config = {
-        "configurable": {"thread_id": thread_id},
+        "configurable": {
+            "thread_id": thread_id,
+            "user_id": current_user.user_id,
+            "username": current_user.username
+        },
         "recursion_limit": 10,
     }
 
@@ -278,7 +282,7 @@ async def chat_endpoint(request: ChatRequest):
         existing_messages = list(existing_messages)
 
     if not existing_messages:
-        previous_history = get_chat_history(thread_id)
+        previous_history = get_chat_history(thread_id, user_id=current_user.user_id)
         for item in previous_history:
             if item["role"] == "assistant":
                 existing_messages.append(AIMessage(content=item["message"]))
@@ -375,7 +379,7 @@ async def chat_endpoint(request: ChatRequest):
 
 
 @app.post("/chat/stream", tags=["Chat"], summary="Streaming Chat", description="Initiates a streaming chat session for real-time AI reasoning and responses.")
-async def chat_stream_endpoint(request: ChatRequest):
+async def chat_stream_endpoint(request: ChatRequest, current_user: UserInDB = Depends(get_current_active_user)):
     """
     Streaming chat endpoint for real-time trace reasoning.
     Provides Server-Sent Events (SSE) for incremental updates.
@@ -383,7 +387,11 @@ async def chat_stream_endpoint(request: ChatRequest):
     thread_id = request.thread_id or str(uuid.uuid4())
     create_thread(thread_id)
     config = {
-        "configurable": {"thread_id": thread_id},
+        "configurable": {
+            "thread_id": thread_id,
+            "user_id": current_user.user_id,
+            "username": current_user.username
+        },
         "recursion_limit": 25,
     }
 
@@ -514,10 +522,10 @@ async def chat_stream_endpoint(request: ChatRequest):
 
 
 @app.post("/chat/threads", response_model=ChatThread, tags=["Chat"], summary="Create Chat Thread", description="Initializes a new conversation thread and returns its unique ID.")
-async def create_chat_thread() -> ChatThread:
+async def create_chat_thread(current_user: UserInDB = Depends(get_current_active_user)) -> ChatThread:
     """Creates a new unique chat thread for tracking conversation history."""
     thread_id = str(uuid.uuid4())
-    create_thread(thread_id)
+    create_thread(thread_id, user_id=current_user.user_id)
     return ChatThread(
         thread_id=thread_id,
         created_at=datetime.utcnow().isoformat() + "Z",
@@ -528,9 +536,9 @@ async def create_chat_thread() -> ChatThread:
 
 
 @app.get("/chat/threads", response_model=List[ChatThread], tags=["Chat"], summary="List Chat Threads", description="Retrieves a list of all chat threads for the current system.")
-async def list_chat_threads() -> List[ChatThread]:
+async def list_chat_threads(current_user: UserInDB = Depends(get_current_active_user)) -> List[ChatThread]:
     """Lists all available chat threads with their metadata and message counts."""
-    rows = get_chat_threads()
+    rows = get_chat_threads(user_id=current_user.user_id)
     return [
         ChatThread(
             thread_id=row["thread_id"],
@@ -544,11 +552,11 @@ async def list_chat_threads() -> List[ChatThread]:
 
 
 @app.get("/chat/history/{thread_id}", response_model=List[ChatHistoryItem], tags=["Chat"], summary="Get Chat History", description="Retrieves the full message history for a specific conversation thread.")
-async def get_chat_history_endpoint(thread_id: str) -> List[ChatHistoryItem]:
+async def get_chat_history_endpoint(thread_id: str, current_user: UserInDB = Depends(get_current_active_user)) -> List[ChatHistoryItem]:
     """Fetches all previous messages and associated metadata for the given thread ID."""
-    if not thread_exists(thread_id):
+    if not thread_exists(thread_id, user_id=current_user.user_id):
         raise HTTPException(status_code=404, detail="Chat thread not found")
-    rows = get_chat_history(thread_id)
+    rows = get_chat_history(thread_id, user_id=current_user.user_id)
     return [
         ChatHistoryItem(
             role=row["role"], 
@@ -560,14 +568,17 @@ async def get_chat_history_endpoint(thread_id: str) -> List[ChatHistoryItem]:
     ]
 
 
-@app.post("/kb/documents", tags=["Knowledge Base"], summary="Ingest Document", description="Uploads a file or provides text content to be added to the RAG knowledge base.")
+@app.post("/kb/documents", tags=["Knowledge"], summary="Ingest Documents", description="Uploads and processes documents for semantic search with user isolation.")
 async def ingest_knowledge(
-    content: Optional[str] = Form(None, description="The raw text content to ingest."),
-    source: Optional[str] = Form(None, description="The source label for the document."),
-    file: Optional[UploadFile] = File(None, description="A file to upload and parse for knowledge ingestion."),
+    file: Optional[UploadFile] = File(None),
+    content: Optional[str] = Form(None),
+    source: Optional[str] = Form(None),
+    scope: str = Form("global"),
+    current_user: UserInDB = Depends(get_current_active_user)
 ):
     """
     Ingest knowledge from either a text payload or an uploaded file.
+    Supports multi-user scoping (Personal, Workspace, Global).
     """
     try:
         final_content = ""
@@ -591,8 +602,15 @@ async def ingest_knowledge(
         if not final_content.strip():
             raise HTTPException(status_code=400, detail="Extracted content is empty")
 
-        # Use the existing RAG tool logic
-        result_json = add_documents_to_knowledge_base(final_content, final_source)
+        # Use the existing RAG tool logic with scope and user_id
+        # 'global' is public, everything else is user-scoped for now
+        # We use .invoke() because the function is decorated as a LangChain tool
+        result_json = add_documents_to_knowledge_base.invoke({
+            "content": final_content, 
+            "source": final_source, 
+            "scope": scope, 
+            "user_id": current_user.user_id if scope != "global" else None
+        })
         result = json.loads(result_json)
 
         if result["status"] == "error":
@@ -614,52 +632,58 @@ async def delete_chat_thread_endpoint(thread_id: str):
 
 
 @app.get("/dashboard/projects", tags=["Dashboard"], summary="List Projects", description="Retrieves a list of all active projects for the Pulse dashboard.")
-async def get_dashboard_projects():
+async def get_dashboard_projects(current_user: UserInDB = Depends(get_current_active_user)):
     """Fetch projects for the Pulse page with status and metrics."""
     try:
-        return get_all_projects()
+        return get_all_projects(user_id=current_user.user_id)
     except Exception as e:
         logger.error(f"Failed to fetch projects: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/dashboard/projects/{project_id}/timeline", tags=["Dashboard"], summary="Get Project Timeline", description="Retrieves a unified timeline of events, milestones, and updates for a specific project.")
-async def get_dashboard_timeline(project_id: str):
+async def get_dashboard_timeline(project_id: str, current_user: UserInDB = Depends(get_current_active_user)):
     """Fetch unified timeline for a project, sorted by date."""
     try:
-        return get_project_timeline(project_id)
+        return get_project_timeline(project_id, user_id=current_user.user_id)
     except Exception as e:
         logger.error(f"Failed to fetch timeline: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/dashboard/projects/{project_id}/simulate-full-lifecycle", tags=["Dashboard"], summary="Simulate Project Lifecycle", description="Triggers a simulation that progresses a project through various lifecycle stages.")
-async def simulate_project_lifecycle(project_id: str):
-    """Simulate a project progressing through its lifecycle for demonstration purposes."""
+async def simulate_project_lifecycle(project_id: str, current_user: UserInDB = Depends(get_current_active_user)):
+    """Simulate a project progressing through its lifecycle with user authorization."""
     # In a real app, this would trigger agent actions.
-    # For now, we'll just return a success message.
     return {"message": f"Simulation started for project {project_id}"}
 
 
 @app.get("/dashboard/notifications", tags=["Dashboard"], summary="Get Notifications", description="Retrieves all pending notifications and meeting transcript alerts.")
-async def get_dashboard_notifications_endpoint():
-    """Fetch pending meeting notifications and suggested actions."""
+async def get_dashboard_notifications_endpoint(current_user: UserInDB = Depends(get_current_active_user)):
+    """Fetch pending meeting notifications and suggested actions, scoped to user."""
     try:
-        return get_pending_notifications()
+        return get_pending_notifications(user_id=current_user.user_id)
     except Exception as e:
         logger.error(f"Failed to fetch notifications: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/dashboard/notifications/{transcript_id}/action", tags=["Dashboard"], summary="Handle Notification Action", description="Applies a specific action (e.g., 'DONE', 'REJECTED') to a pending notification.")
-async def handle_notification_action(transcript_id: int, action: str = Body(..., embed=True, description="The action to take on the notification (e.g., 'make_rfp', 'reject').")):
-    """Handle actions on notifications and update their status accordingly."""
+async def handle_notification_action(transcript_id: int, action: str = Body(..., embed=True), current_user: UserInDB = Depends(get_current_active_user)):
+    """Handle actions on notifications with security checks."""
     try:
+        # Check authorization
+        pending = get_pending_notifications(user_id=current_user.user_id)
+        if not any(n['id'] == transcript_id for n in pending):
+             raise HTTPException(status_code=403, detail="Unauthorized access to notification")
+
         status = "DONE" if action == "make_rfp" else "REJECTED"
         success = update_notification_status(transcript_id, status)
         if not success:
-            raise HTTPException(status_code=404, detail="Notification not found")
+            raise HTTPException(status_code=404, detail="Notification update failed")
         return {"status": "success", "action_taken": action}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to process notification action: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -676,10 +700,10 @@ async def get_chat_suggestions_endpoint(thread_id: str):
 
 
 @app.get("/audit/access-gaps", tags=["Audit"], summary="Get Access Gaps", description="Retrieves all detected security access anomalies and redundant permissions.")
-async def get_audit_access_gaps():
-    """Fetch all access gaps for the Access Guard page."""
+async def get_audit_access_gaps(current_user: UserInDB = Depends(get_current_active_user)):
+    """Fetch all access gaps for the Access Guard page, scoped by user."""
     try:
-        return get_access_gaps()
+        return get_access_gaps(user_id=current_user.user_id)
     except Exception as e:
         logger.error(f"Failed to fetch access gaps: {e}")
         raise HTTPException(status_code=500, detail=str(e))

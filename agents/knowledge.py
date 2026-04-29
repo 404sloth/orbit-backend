@@ -4,27 +4,35 @@ Uses create_react_agent for multi-step RAG reasoning.
 """
 import pathlib
 from langgraph.prebuilt import create_react_agent
+from langchain_core.runnables import RunnableConfig
 from core.factory import get_llm
 from core.state import GraphState
 from core.logger import logger
 from tools.rag import search_project_documents, add_documents_to_knowledge_base
 
 
-def rag_node(state: GraphState) -> dict:
+def rag_node(state: GraphState, config: RunnableConfig) -> dict:
     """
     Knowledge Agent sub-agent node. Searches and ingests
     unstructured project documents via ChromaDB.
-
-    Steps:
-    1. Creates a ReAct agent with RAG tools.
-    2. Executes the agent and returns only new messages.
     """
     llm = get_llm(temperature=0)
+    
+    # Retrieve user context from config
+    user_id = config.get("configurable", {}).get("user_id")
+    username = config.get("configurable", {}).get("username", "Executive")
+
+    # Define tools with user context partially applied or handled within tool
     tools = [search_project_documents, add_documents_to_knowledge_base]
 
-    sys_msg = """You are the Project Knowledge Agent for an executive dashboard.
+    sys_msg = f"""You are the Project Knowledge Agent for an executive dashboard.
 Your job is to search through and manage the unstructured knowledge base containing
 meeting transcripts, vendor proposals, requirements documents, and project notes.
+
+SECURITY CONTEXT:
+- CURRENT USER: {username} (ID: {user_id})
+- PRIVACY RULE: You must ONLY access documents that are either "global" or marked as "personal" for your User ID ({user_id}).
+- DATA ISOLATION: Never reveal or search for documents belonging to other user IDs. If a user asks for private data outside their scope, inform them that no such document exists in their repository.
 
 AVAILABLE TOOLS:
 1. search_project_documents — Semantic search across all stored documents.

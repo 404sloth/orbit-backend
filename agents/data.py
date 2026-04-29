@@ -5,6 +5,7 @@ tool calling loops. Generates its own subgraph diagram.
 """
 import pathlib
 from langgraph.prebuilt import create_react_agent
+from langchain_core.runnables import RunnableConfig
 from core.factory import get_llm
 from core.state import GraphState
 from core.logger import logger
@@ -17,7 +18,7 @@ from tools.sql import (
 )
 
 
-def sql_node(state: GraphState) -> dict:
+def sql_node(state: GraphState, config: RunnableConfig) -> dict:
     """
     Data Analyst sub-agent node. Builds a ReAct agent with SQL tools
     and invokes it on the current conversation state.
@@ -36,6 +37,10 @@ def sql_node(state: GraphState) -> dict:
     ]
 
 
+    # Retrieve user context from config
+    user_id = config.get("configurable", {}).get("user_id", "Unknown")
+    username = config.get("configurable", {}).get("username", "Executive")
+    
     # Retrieve dynamic schema summary (reduced size for TPM limits)
     table_names = get_table_names()
     tables_list = ", ".join(table_names)
@@ -43,14 +48,20 @@ def sql_node(state: GraphState) -> dict:
     sys_msg = f"""You are the Data Analyst Agent for an executive project dashboard.
 Your job is to answer questions by querying the project database accurately.
 
+SECURITY CONTEXT:
+- CURRENT USER: {username} (ID: {user_id})
+- PRIVACY RULE: You MUST filter all queries to the 'projects' and 'clients' tables by 'user_id = {user_id}'.
+- DATA ISOLATION: Never return or query data belonging to other user IDs. If a user asks for data outside their scope, politely state that no such project or client was found.
+
 DATABASE CONTEXT:
 The database contains the following tables: [{tables_list}].
 Use 'describe_table_schema' to see column details for specific tables before querying.
 
 CORE TABLES FOR STATUS:
-- projects: Project names and overall status.
-- milestones: Detailed delivery schedule and status.
-- vendor_bids: Procurement bids and statuses.
+- projects: Project names and overall status. (Filters: user_id)
+- milestones: Detailed delivery schedule and status. (Joins: projects.project_id)
+- vendor_bids: Procurement bids and statuses. (Joins: rfp_documents -> projects)
+- clients: Client details. (Filters: user_id)
 
 AVAILABLE TOOLS:
 1. list_database_tables — Discover all available tables.

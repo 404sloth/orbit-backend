@@ -21,10 +21,12 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS clients (
     client_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER,
     company_name    TEXT NOT NULL,
     contact_person  TEXT,
     industry        TEXT,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 CREATE TABLE IF NOT EXISTS vendors (
@@ -37,11 +39,13 @@ CREATE TABLE IF NOT EXISTS vendors (
 CREATE TABLE IF NOT EXISTS projects (
     project_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id       INTEGER NOT NULL,
+    user_id         INTEGER,
     project_name    TEXT NOT NULL,
     current_status  TEXT NOT NULL DEFAULT 'Discovery'
                     CHECK(current_status IN ('Discovery','RFP','Bidding','Active','Completed')),
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(client_id)
+    FOREIGN KEY (client_id) REFERENCES clients(client_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 -- ===================== RFP / BIDDING =====================
@@ -153,19 +157,21 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS chat_history (
     chat_id             INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id          INTEGER,
-    user_id             TEXT,
+    user_id             INTEGER,
     message_content     TEXT,
     ai_response         TEXT,
     intent_identified   TEXT,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+    FOREIGN KEY (project_id) REFERENCES projects(project_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 CREATE TABLE IF NOT EXISTS chat_threads (
     thread_id  TEXT PRIMARY KEY,
-    user_id    TEXT,
+    user_id    INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -173,6 +179,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     thread_id  TEXT NOT NULL,
     role       TEXT NOT NULL CHECK(role IN ('user','assistant')),
     content    TEXT NOT NULL,
+    metadata   TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (thread_id) REFERENCES chat_threads(thread_id) ON DELETE CASCADE
 );
@@ -193,6 +200,15 @@ CREATE TABLE IF NOT EXISTS permissions (
     permission_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     permission_name TEXT UNIQUE NOT NULL,
     description     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS user_permissions (
+    user_id       INTEGER NOT NULL,
+    permission_id INTEGER NOT NULL,
+    granted_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, permission_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permissions(permission_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS access_gaps (
@@ -239,12 +255,12 @@ VALUES
     (4, 'elena_rodriguez', 'elena.r@wellspring.health', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6fM9q7F6e', 'USER', 1, 1);
 
 -- ===== CLIENTS =====
-INSERT OR IGNORE INTO clients (client_id, company_name, contact_person, industry)
+INSERT OR IGNORE INTO clients (client_id, user_id, company_name, contact_person, industry)
 VALUES
-    (1, 'Aegis Dynamics',        'Michael Chen',       'Aerospace & Defense'),
-    (2, 'Wellspring Health',     'Dr. Lisa Abernathy', 'Healthcare'),
-    (3, 'NovaLogic Systems',     'Arjun Mehta',        'Enterprise SaaS'),
-    (4, 'Greenfield Retail',     'Sarah Whitman',      'Retail & E-Commerce');
+    (1, 1, 'Aegis Dynamics',        'Michael Chen',       'Aerospace & Defense'),
+    (2, 4, 'Wellspring Health',     'Dr. Lisa Abernathy', 'Healthcare'),
+    (3, 1, 'NovaLogic Systems',     'Arjun Mehta',        'Enterprise SaaS'),
+    (4, 2, 'Greenfield Retail',     'Sarah Whitman',      'Retail & E-Commerce');
 
 -- ===== VENDORS =====
 INSERT OR IGNORE INTO vendors (vendor_id, vendor_name, tech_expertise, rating)
@@ -256,13 +272,13 @@ VALUES
     (5, 'Nebula Analytics',      'Data Warehousing, Snowflake, dbt, PowerBI, ETL/ELT, Data Governance',    4.7);
 
 -- ===== PROJECTS =====
-INSERT OR IGNORE INTO projects (project_id, client_id, project_name, current_status)
+INSERT OR IGNORE INTO projects (project_id, client_id, user_id, project_name, current_status)
 VALUES
-    (1, 1, 'Phoenix ERP Modernization',           'Active'),
-    (2, 2, 'Patient 360 Portal',                  'RFP'),
-    (3, 3, 'AI‑Native Analytics Platform',         'Bidding'),
-    (4, 1, 'Supply Chain Security Overhaul',       'Completed'),
-    (5, 4, 'Omnichannel Dashboard Unification',    'Discovery');
+    (1, 1, 1, 'Phoenix ERP Modernization',           'Active'),
+    (2, 2, 4, 'Patient 360 Portal',                  'RFP'),
+    (3, 3, 1, 'AI‑Native Analytics Platform',         'Bidding'),
+    (4, 1, 1, 'Supply Chain Security Overhaul',       'Completed'),
+    (5, 4, 2, 'Omnichannel Dashboard Unification',    'Discovery');
 
 -- ===== RFP DOCUMENTS =====
 INSERT OR IGNORE INTO rfp_documents (rfp_id, project_id, issue_date, deadline, budget_range_max)
@@ -417,18 +433,18 @@ VALUES
 -- ===== CHAT HISTORY (simulated support interactions) =====
 INSERT OR IGNORE INTO chat_history (chat_id, project_id, user_id, message_content, ai_response, intent_identified, created_at)
 VALUES
-    (1, 1, 'admin', 'What is the current status of the Phoenix ERP project?',
+    (1, 1, 1, 'What is the current status of the Phoenix ERP project?',
      'Phoenix ERP Modernization is Active. Milestone M2 (Core Data Migration) is In-Progress; 13/14 tables passed validation. The next milestone is Integration Testing planned for 2025‑08‑15.',
      'project_status_query', '2025-05-21T08:30:00'),
-    (2, 2, 'admin', 'Show me the RFP documents for Patient 360',
+    (2, 2, 1, 'Show me the RFP documents for Patient 360',
      'There is one RFP (ID 2) with a deadline of 2025‑04‑15 and a budget cap of $400,000. Currently three bids are under evaluation.',
      'rfp_lookup', '2025-04-02T13:00:00'),
-    (3, 3, 'admin', 'Who are the vendors bidding for the AI Analytics Platform?',
+    (3, 3, 1, 'Who are the vendors bidding for the AI Analytics Platform?',
      'Three vendors submitted bids: DataPulse AI ($980k), CloudForge Solutions ($1.05M), and Nebula Analytics ($1.025M). DataPulse is currently Shortlisted.',
      'vendor_list_query', '2025-07-09T09:15:00');
 
 -- ===== CHAT THREADS & MESSAGES (multi‑turn conversation) =====
-INSERT OR IGNORE INTO chat_threads (thread_id, user_id) VALUES ('thread-001', 'admin');
+INSERT OR IGNORE INTO chat_threads (thread_id, user_id) VALUES ('thread-001', 1);
 INSERT OR IGNORE INTO chat_messages (message_id, thread_id, role, content, created_at)
 VALUES
     (1, 'thread-001', 'user',      'Can you send me the security assessment milestones for the Supply Chain project?', '2025-04-25T11:00:00'),
@@ -498,11 +514,19 @@ def init_database():
     conn.executescript(DDL)
     print("✓ All tables created.")
 
-    conn.executescript(SEED_DATA)
-    print("✓ Sample data seeded.")
+    # Only seed if users table is empty to prevent data loss on accidental re-init
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users")
+    user_count = cursor.fetchone()[0]
+
+    if user_count == 0:
+        print("Seeding initial sample data...")
+        conn.executescript(SEED_DATA)
+        print("✓ Sample data seeded.")
+    else:
+        print(f"✓ Database already contains {user_count} users. Skipping seed.")
 
     # Verify
-    cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
     tables = [row[0] for row in cursor.fetchall()]
     print(f"✓ Tables present: {tables}")
