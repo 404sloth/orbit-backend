@@ -22,6 +22,8 @@ from core.schemas import (
     ChatRequest,
     ChatResponse,
     ChatThread,
+    CreditDeductionRequest,
+    VendorBillRequest,
 )
 from core.logger import logger
 from core.config import settings
@@ -58,6 +60,7 @@ from core.session import init_reports_dir, cleanup_old_reports, REPORTS_TEMP_DIR
 from db.dashboard import get_all_projects, get_project_timeline, get_pending_notifications, update_notification_status
 from db.audit import get_access_gaps
 from db.suggestions import get_dynamic_suggestions
+from services.credit_service import CreditService
 import os
 
 from contextlib import asynccontextmanager
@@ -390,7 +393,8 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: UserInDB = De
         "configurable": {
             "thread_id": thread_id,
             "user_id": current_user.user_id,
-            "username": current_user.username
+            "username": current_user.username,
+            "role": current_user.role
         },
         "recursion_limit": 25,
     }
@@ -538,7 +542,7 @@ async def create_chat_thread(current_user: UserInDB = Depends(get_current_active
 @app.get("/chat/threads", response_model=List[ChatThread], tags=["Chat"], summary="List Chat Threads", description="Retrieves a list of all chat threads for the current system.")
 async def list_chat_threads(current_user: UserInDB = Depends(get_current_active_user)) -> List[ChatThread]:
     """Lists all available chat threads with their metadata and message counts."""
-    rows = get_chat_threads(user_id=current_user.user_id)
+    rows = get_chat_threads(user_id=current_user.user_id, role=current_user.role)
     return [
         ChatThread(
             thread_id=row["thread_id"],
@@ -554,9 +558,9 @@ async def list_chat_threads(current_user: UserInDB = Depends(get_current_active_
 @app.get("/chat/history/{thread_id}", response_model=List[ChatHistoryItem], tags=["Chat"], summary="Get Chat History", description="Retrieves the full message history for a specific conversation thread.")
 async def get_chat_history_endpoint(thread_id: str, current_user: UserInDB = Depends(get_current_active_user)) -> List[ChatHistoryItem]:
     """Fetches all previous messages and associated metadata for the given thread ID."""
-    if not thread_exists(thread_id, user_id=current_user.user_id):
+    if not thread_exists(thread_id, user_id=current_user.user_id, role=current_user.role):
         raise HTTPException(status_code=404, detail="Chat thread not found")
-    rows = get_chat_history(thread_id, user_id=current_user.user_id)
+    rows = get_chat_history(thread_id, user_id=current_user.user_id, role=current_user.role)
     return [
         ChatHistoryItem(
             role=row["role"], 
@@ -609,7 +613,8 @@ async def ingest_knowledge(
             "content": final_content, 
             "source": final_source, 
             "scope": scope, 
-            "user_id": current_user.user_id if scope != "global" else None
+            "user_id": current_user.user_id if scope != "global" else None,
+            "role": current_user.role
         })
         result = json.loads(result_json)
 
@@ -623,9 +628,9 @@ async def ingest_knowledge(
 
 
 @app.delete("/chat/threads/{thread_id}", tags=["Chat"], summary="Delete Chat Thread", description="Permanently deletes a chat thread and all its associated message history.")
-async def delete_chat_thread_endpoint(thread_id: str):
+async def delete_chat_thread_endpoint(thread_id: str, current_user: UserInDB = Depends(get_current_active_user)):
     """Removes the specified thread and all stored messages from the database."""
-    if not thread_exists(thread_id):
+    if not thread_exists(thread_id, user_id=current_user.user_id, role=current_user.role):
         raise HTTPException(status_code=404, detail="Chat thread not found")
     delete_chat_thread(thread_id)
     return {"detail": "Chat thread deleted"}
@@ -635,7 +640,7 @@ async def delete_chat_thread_endpoint(thread_id: str):
 async def get_dashboard_projects(current_user: UserInDB = Depends(get_current_active_user)):
     """Fetch projects for the Pulse page with status and metrics."""
     try:
-        return get_all_projects(user_id=current_user.user_id)
+        return get_all_projects(user_id=current_user.user_id, role=current_user.role)
     except Exception as e:
         logger.error(f"Failed to fetch projects: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -645,7 +650,7 @@ async def get_dashboard_projects(current_user: UserInDB = Depends(get_current_ac
 async def get_dashboard_timeline(project_id: str, current_user: UserInDB = Depends(get_current_active_user)):
     """Fetch unified timeline for a project, sorted by date."""
     try:
-        return get_project_timeline(project_id, user_id=current_user.user_id)
+        return get_project_timeline(project_id, user_id=current_user.user_id, role=current_user.role)
     except Exception as e:
         logger.error(f"Failed to fetch timeline: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -662,7 +667,7 @@ async def simulate_project_lifecycle(project_id: str, current_user: UserInDB = D
 async def get_dashboard_notifications_endpoint(current_user: UserInDB = Depends(get_current_active_user)):
     """Fetch pending meeting notifications and suggested actions, scoped to user."""
     try:
-        return get_pending_notifications(user_id=current_user.user_id)
+        return get_pending_notifications(user_id=current_user.user_id, role=current_user.role)
     except Exception as e:
         logger.error(f"Failed to fetch notifications: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -673,7 +678,7 @@ async def handle_notification_action(transcript_id: int, action: str = Body(...,
     """Handle actions on notifications with security checks."""
     try:
         # Check authorization
-        pending = get_pending_notifications(user_id=current_user.user_id)
+        pending = get_pending_notifications(user_id=current_user.user_id, role=current_user.role)
         if not any(n['id'] == transcript_id for n in pending):
              raise HTTPException(status_code=403, detail="Unauthorized access to notification")
 
@@ -703,11 +708,41 @@ async def get_chat_suggestions_endpoint(thread_id: str):
 async def get_audit_access_gaps(current_user: UserInDB = Depends(get_current_active_user)):
     """Fetch all access gaps for the Access Guard page, scoped by user."""
     try:
-        return get_access_gaps(user_id=current_user.user_id)
+        return get_access_gaps(user_id=current_user.user_id, role=current_user.role)
     except Exception as e:
         logger.error(f"Failed to fetch access gaps: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/reports/list", tags=["Reports"], summary="List All Reports")
+async def list_reports():
+    """Returns a list of all generated reports in the temporary directory."""
+    try:
+        from core.session import REPORTS_TEMP_DIR
+        if not os.path.exists(REPORTS_TEMP_DIR):
+            return []
+            
+        reports = []
+        for filename in os.listdir(REPORTS_TEMP_DIR):
+            filepath = os.path.join(REPORTS_TEMP_DIR, filename)
+            if os.path.isfile(filepath):
+                mtime = os.path.getmtime(filepath)
+                ext = filename.split('.')[-1].lower()
+                report_type = "pdf" if ext == "pdf" else ("excel" if ext in ["xlsx", "csv"] else "image")
+                
+                reports.append({
+                    "filename": filename,
+                    "url": f"http://localhost:8000/reports/download/{filename}",
+                    "type": report_type,
+                    "timestamp": datetime.fromtimestamp(mtime).isoformat()
+                })
+        
+        # Sort by timestamp descending
+        reports.sort(key=lambda x: x["timestamp"], reverse=True)
+        return reports
+    except Exception as e:
+        logger.error("Failed to list reports", error=str(e))
+        return []
 
 @app.get("/reports/download/{filename}", tags=["Reports"], summary="Download Report", description="Serves a generated report file (Excel, PDF, or image) for download.")
 async def download_report(filename: str):
@@ -735,3 +770,45 @@ if __name__ == "__main__":
     import uvicorn
     # Use string reference to allow reload=True for persistent development mode
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+# ========================== Credit Management ==========================
+
+@app.get("/credits/summary", tags=["Credits"])
+async def get_credit_summary(current_user: UserInDB = Depends(get_current_active_user)):
+    return CreditService.get_summary(current_user.user_id, role=current_user.role)
+
+@app.post("/credits/deduct", tags=["Credits"])
+async def deduct_credits(
+    request: CreditDeductionRequest,
+    current_user: UserInDB = Depends(get_current_active_user)
+):
+    success = CreditService.deduct_credits(
+        current_user.user_id,
+        request.project_id,
+        request.task_name,
+        request.amount
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Insufficient credits or invalid request")
+    return {"status": "success", "message": f"Deducted {request.amount} credits"}
+
+@app.post("/credits/bill", tags=["Credits"])
+async def process_vendor_bill(
+    request: VendorBillRequest,
+    current_user: UserInDB = Depends(get_current_active_user)
+):
+    result = CreditService.adjust_vendor_bill(
+        current_user.user_id,
+        request.vendor_id,
+        request.project_id,
+        request.total_amount
+    )
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to process vendor bill")
+    return result
+
+@app.post("/credits/close-year", tags=["Credits"])
+async def close_year(current_user: UserInDB = Depends(get_current_active_user)):
+    success = CreditService.close_financial_year(current_user.user_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to close financial year")
+    return {"status": "success", "message": "Financial year closed and credits carried forward"}

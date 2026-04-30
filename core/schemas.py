@@ -21,6 +21,10 @@ class ExecuteQuerySchema(BaseModel):
         None,
         description="The ID of the user performing the query. Automatically injected, do not provide manually."
     )
+    role: Optional[str] = Field(
+        "USER",
+        description="The role of the user (e.g., 'ADMIN', 'USER'). Automatically injected."
+    )
 
 class CacheMetricSchema(BaseModel):
     """Schema for the cache_dashboard_metric tool."""
@@ -64,6 +68,10 @@ class SearchDocumentsSchema(BaseModel):
         None,
         description="The ID of the user performing the search (optional, used for personal scope)."
     )
+    role: Optional[str] = Field(
+        "USER",
+        description="The role of the user. Automatically injected."
+    )
 
 class AddDocumentsSchema(BaseModel):
     """Schema for the add_documents_to_knowledge_base tool."""
@@ -81,6 +89,10 @@ class AddDocumentsSchema(BaseModel):
         None,
         description="The ID of the user who owns the document (required for personal scope)."
     )
+    role: Optional[str] = Field(
+        "USER",
+        description="The role of the user. Automatically injected."
+    )
 
 class KnowledgeSearchSchema(BaseModel):
     """Schema for the hybrid_knowledge_search tool."""
@@ -90,6 +102,10 @@ class KnowledgeSearchSchema(BaseModel):
     user_id: Optional[int] = Field(
         None,
         description="The ID of the current user. Automatically injected."
+    )
+    role: Optional[str] = Field(
+        "USER",
+        description="The role of the user. Automatically injected."
     )
     depth: str = Field(
         default="balanced",
@@ -105,6 +121,10 @@ class SearchTranscriptsSchema(BaseModel):
     user_id: Optional[int] = Field(
         None,
         description="The ID of the current user. Automatically injected."
+    )
+    role: Optional[str] = Field(
+        "USER",
+        description="The role of the user. Automatically injected."
     )
 class GenerateReportSchema(BaseModel):
     """Schema for the generate_executive_report tool."""
@@ -123,8 +143,13 @@ class GenerateReportSchema(BaseModel):
     )
     format: str = Field(
         default="PDF",
-        description="The output format of the report. Must be one of ['PDF', 'DOCX', 'EXCEL']."
+        description="The output format of the report. Must be one of ['PDF', 'DOCX', 'EXCEL', 'IMAGE']."
     )
+    template_name: Optional[str] = Field(
+        default="Executive Gold",
+        description="Style template to use: ['Executive Gold', 'Modern Blue', 'Classic Slate', 'Urgent Red']."
+    )
+
 
 # ========================== API Schemas ==========================
 
@@ -154,3 +179,16 @@ class ChatHistoryItem(BaseModel):
     message: str = Field(..., description="The text content of the message.")
     timestamp: str = Field(..., description="ISO 8601 timestamp of when the message was sent.")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Optional structured metadata associated with the message (e.g., reasoning, tool usage).")
+
+# ========================== Credit Schemas ==========================
+
+class CreditDeductionRequest(BaseModel):
+    project_id: Optional[int] = None
+    task_name: str
+    amount: float
+
+class VendorBillRequest(BaseModel):
+    vendor_id: int
+    project_id: int
+    total_amount: float
+

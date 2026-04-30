@@ -42,25 +42,33 @@ Example Output:
         response = chain.invoke({"messages": context_messages})
         content = response.content.strip()
         
-        # Parse JSON
+        # 1. Try finding JSON within markdown blocks
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
             content = content.split("```")[1].split("```")[0].strip()
             
+        # 2. Robust array extraction
+        if "[" in content and "]" in content:
+            start_idx = content.find("[")
+            end_idx = content.rfind("]") + 1
+            content = content[start_idx:end_idx]
+
+            
         suggestions = json.loads(content)
-        if not isinstance(suggestions, list):
-            suggestions = []
+        if not isinstance(suggestions, list) or not suggestions:
+            raise ValueError("Invalid or empty suggestions list")
         
         # Ensure exactly 3 and clean them
         suggestions = [str(s)[:100] for s in suggestions[:3]]
         
         logger.info("Suggestions generated", count=len(suggestions))
-        
-        # Return as metadata/signal - we don't want to add them to the message history
-        # Instead, we'll return a special key that the graph runner can emit as an event
         return {"dynamic_suggestions": suggestions}
         
     except Exception as e:
-        logger.error("Failed to generate suggestions", error=str(e))
-        return {"dynamic_suggestions": []}
+        logger.error("Failed to generate suggestions, using defaults", error=str(e))
+        return {"dynamic_suggestions": [
+            "Show project budget status",
+            "Identify delayed tasks",
+            "Generate weekly summary"
+        ]}

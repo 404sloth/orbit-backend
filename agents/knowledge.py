@@ -21,6 +21,7 @@ def rag_node(state: GraphState, config: RunnableConfig) -> dict:
     # Retrieve user context from config
     user_id = config.get("configurable", {}).get("user_id")
     username = config.get("configurable", {}).get("username", "Executive")
+    role = config.get("configurable", {}).get("role", "USER")
 
     # Define tools with user context partially applied or handled within tool
     tools = [search_project_documents, add_documents_to_knowledge_base]
@@ -30,9 +31,9 @@ Your job is to search through and manage the unstructured knowledge base contain
 meeting transcripts, vendor proposals, requirements documents, and project notes.
 
 SECURITY CONTEXT:
-- CURRENT USER: {username} (ID: {user_id})
-- PRIVACY RULE: You must ONLY access documents that are either "global" or marked as "personal" for your User ID ({user_id}).
-- DATA ISOLATION: Never reveal or search for documents belonging to other user IDs. If a user asks for private data outside their scope, inform them that no such document exists in their repository.
+- CURRENT USER: {username} (ID: {user_id}, Role: {role})
+- PRIVACY RULE: {"As an ADMIN, you can access and manage all documents across the system." if role == "ADMIN" else f"You must ONLY access documents that are either 'global' or marked as 'personal' for your User ID ({user_id})."}
+- DATA ISOLATION: {"You can see everything." if role == "ADMIN" else "Never reveal or search for documents belonging to other user IDs. If a user asks for private data outside their scope, inform them that no such document exists in their repository."}
 
 AVAILABLE TOOLS:
 1. search_project_documents — Semantic search across all stored documents.

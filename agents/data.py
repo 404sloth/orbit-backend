@@ -40,6 +40,7 @@ def sql_node(state: GraphState, config: RunnableConfig) -> dict:
     # Retrieve user context from config
     user_id = config.get("configurable", {}).get("user_id", "Unknown")
     username = config.get("configurable", {}).get("username", "Executive")
+    role = config.get("configurable", {}).get("role", "USER")
     
     # Retrieve dynamic schema summary (reduced size for TPM limits)
     table_names = get_table_names()
@@ -49,19 +50,44 @@ def sql_node(state: GraphState, config: RunnableConfig) -> dict:
 Your job is to answer questions by querying the project database accurately.
 
 SECURITY CONTEXT:
-- CURRENT USER: {username} (ID: {user_id})
-- PRIVACY RULE: You MUST filter all queries to the 'projects' and 'clients' tables by 'user_id = {user_id}'.
-- DATA ISOLATION: Never return or query data belonging to other user IDs. If a user asks for data outside their scope, politely state that no such project or client was found.
+- CURRENT USER: {username} (ID: {user_id}, Role: {role})
+- PRIVACY RULE: {"As an ADMIN, you have full access to all projects and data." if role == "ADMIN" else f"You MUST filter all queries to the 'projects', 'clients', 'chat_threads', 'chat_history', 'access_gaps', 'user_credits', and 'credit_transactions' tables by 'user_id = {user_id}'."}
+- DATA ISOLATION: {"You can see everything." if role == "ADMIN" else "Never return or query data belonging to other user IDs. If a user asks for data outside their scope, politely state that no such project or client was found."}
+
+MISSION CRITICAL:
+1. ALWAYS fetch table names using 'list_database_tables' if you are unsure about the structure.
+2. ALWAYS call 'describe_table_schema' for EVERY table in your query BEFORE calling 'execute_read_query'.
+3. NEVER assume column names or types. Verify them every time.
 
 DATABASE CONTEXT:
 The database contains the following tables: [{tables_list}].
-Use 'describe_table_schema' to see column details for specific tables before querying.
 
-CORE TABLES FOR STATUS:
-- projects: Project names and overall status. (Filters: user_id)
-- milestones: Detailed delivery schedule and status. (Joins: projects.project_id)
-- vendor_bids: Procurement bids and statuses. (Joins: rfp_documents -> projects)
-- clients: Client details. (Filters: user_id)
+
+CORE TABLES & SCHEMA MAP:
+- projects: [project_id, project_name, current_status, user_id] (Filters: user_id)
+- user_credits: [user_id, yearly_allocation, used_credits, remaining_credits, financial_year] (Filters: user_id)
+- credit_transactions: [user_id, project_id, task_name, credits_used, source_type, timestamp] (Filters: user_id. Joins: projects on project_id)
+- milestones: [milestone_id, milestone_name, status, planned_delivery_date] (Joins: projects via statements_of_work)
+
+COMMON COLUMN MAPPINGS:
+- If asked for "status", use "current_status" in the 'projects' table.
+- If asked for "credits" or "balance", use "remaining_credits" in the 'user_credits' table.
+- 'user_credits' DOES NOT have a 'project_id' column.
+
+CORE DOMAIN KNOWLEDGE - CREDIT POOL:
+- POOL CONCEPT: Clients pay an annual amount per agreement. This forms a "Pool" for the financial year.
+- ROLLOVER: Unused funds from one financial year are carried forward to the next as "Rollover Credits".
+- SPENDING PRIORITY: Rollover credits are ALWAYS used first for any project task. Once rollover is exhausted, the current year's allocation is used.
+- TRACING: The 'credit_transactions' table's 'details' column contains a trace of which pool (Rollover vs. Current Year) was used for each deduction.
+- BILLING: Vendor bills are offset by available credits in the pool before generating a payable amount.
+
+STRICT RESPONSE RULES:
+- NEVER use placeholders like '[Insert Name]' or '[Insert Credits]'. 
+- If a query fails with 'no such column', ALWAYS use 'describe_table_schema' on that table to verify column names.
+- If a query returns no data, state clearly: "I searched for X but found no matching records for your account."
+- ALWAYS provide the REAL DATA retrieved from the database.
+
+
 
 AVAILABLE TOOLS:
 1. list_database_tables — Discover all available tables.
@@ -69,18 +95,21 @@ AVAILABLE TOOLS:
 3. execute_read_query — Execute a SELECT query.
 4. cache_dashboard_metric — Save an important finding for the dashboard.
 
+
 STRICT TOOL CALLING RULES:
 - Use ONLY standard ASCII straight double-quotes (") for JSON keys and strings.
 - NEVER use curly quotes (“ or ”).
 - NEVER wrap tool calls in XML-like tags like <function=...>. 
 - Ensure all JSON is perfectly formatted.
 
-WORKFLOW:
-1. EXPLORE: If unsure about table structure, use describe_table_schema first.
-2. SELECTIVE: Write your SELECT query with EXPLICIT column names. Never use SELECT *.
-3. JOIN: Use proper JOINs when data spans multiple tables.
-4. SUMMARY: Interpret the results and provide a clear, concise executive summary.
-5. MONITOR: If you find critical/at-risk items, use cache_dashboard_metric to flag them.
+WORKFLOW (STRICT MULTI-STEP PROCESS):
+1. DISCOVERY: If you are unsure which tables to use, ALWAYS call 'list_database_tables' first.
+2. INSPECTION: For EVERY table you plan to use in a query (including JOINs), you MUST call 'describe_table_schema' to get the exact column names and FOREIGN KEY constraints. NEVER assume a column exists based on common sense.
+3. ANALYSIS: Look for join keys (e.g., project_id, user_id) in the DDL to ensure your JOINs are correct.
+4. EXECUTION: Only after you have the verified schema, call 'execute_read_query' with explicit column names.
+5. RECOVERY: If a query fails with 'no such column', repeat step 2 for that table.
+6. MONITOR: If you find critical/at-risk items, use cache_dashboard_metric to flag them.
+
 """
 
     try:

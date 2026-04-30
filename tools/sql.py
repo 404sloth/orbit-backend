@@ -21,20 +21,22 @@ from db.client import get_db_connection
 from db.schema import get_table_names, get_bcnf_schema, get_table_columns
 from core.logger import logger
 from core.exceptions import DatabaseQueryError
+from services.credit_service import CreditService
 
 
 @tool(args_schema=ExecuteQuerySchema)
-def execute_read_query(query: str, user_id: Optional[int] = None) -> str:
+def execute_read_query(query: str, user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Executes a single SELECT SQL query on the project database with strict RBAC enforcement.
 
     Input:
         query: A valid SQL SELECT statement.
         user_id: The ID of the current user (injected from context).
+        role: The role of the current user (injected from context).
 
     Security:
         - Only single SELECT statements are allowed.
-        - Automatically injects 'user_id' filters for sensitive tables (projects, clients, threads, etc.).
+        - Automatically injects 'user_id' filters for sensitive tables unless role is ADMIN.
         - Blocks access to administrative tables (users, permissions).
     """
     if user_id is None:
@@ -58,10 +60,14 @@ def execute_read_query(query: str, user_id: Optional[int] = None) -> str:
         "projects": "user_id",
         "clients": "user_id",
         "chat_threads": "user_id",
-        "chat_messages": "thread_id", # Indirectly secured via thread_id
+        "chat_messages": "thread_id",
         "chat_history": "user_id",
         "access_gaps": "user_id",
-        "meeting_transcripts": "project_id", # Secured via project_id
+        "meeting_transcripts": "project_id",
+        "user_credits": "user_id",
+        "credit_transactions": "user_id",
+        "vendor_bills": "user_id",
+        "yearly_closings": "user_id",
     }
     ADMIN_TABLES = {"users", "permissions", "user_permissions", "security_events"}
 
@@ -90,14 +96,15 @@ def execute_read_query(query: str, user_id: Optional[int] = None) -> str:
             # Find all table references in this SELECT
             for table in node.find_all(exp.Table):
                 t_name = table.name.lower()
-                if t_name in ["projects", "clients", "chat_threads", "chat_history", "access_gaps"]:
+                if t_name in ["projects", "clients", "chat_threads", "chat_history", "access_gaps", "user_credits", "credit_transactions", "vendor_bills", "yearly_closings"]:
                     # Use alias if available, otherwise use table name
                     alias = table.alias if table.alias else t_name
                     node.where(f"{alias}.user_id = {user_id}", copy=False)
         return node
 
-    # Apply transformation
-    expression = transform_expression(expression)
+    # Apply transformation (Only for non-ADMIN users)
+    if role != "ADMIN":
+        expression = transform_expression(expression)
 
     # --- Auto LIMIT guard ---
     if not expression.find(exp.Limit):
@@ -112,7 +119,9 @@ def execute_read_query(query: str, user_id: Optional[int] = None) -> str:
             cursor.execute(final_query)
             rows = cursor.fetchall()
             data = [dict(row) for row in rows]
+            
             logger.info("SQL Query Executed (RBAC Enforced)", query=final_query, user_id=user_id, row_count=len(data))
+
             return json.dumps({"status": "success", "data": data, "message": f"Returned {len(data)} rows (Scoped to user {user_id})."})
     except Exception as e:
         logger.error("SQL Execution Error", query=final_query, error=str(e))
@@ -151,12 +160,23 @@ def describe_table_schema(table_name: str) -> str:
         columns = get_table_columns(table_name)
         if not ddl:
             return json.dumps({"status": "error", "message": f"Table '{table_name}' not found."})
+        
+        # Extract join keys for the agent
+        join_keys = [c for c in columns if c.endswith("_id")]
+        foreign_keys = [line.strip() for line in ddl.split("\n") if "FOREIGN KEY" in line.upper()]
+        
         logger.info("Described table schema", table=table_name)
         return json.dumps({
             "status": "success",
-            "data": {"ddl": ddl, "columns": columns},
-            "message": f"Schema for '{table_name}' with {len(columns)} columns."
+            "data": {
+                "ddl": ddl, 
+                "columns": columns,
+                "suggested_joins": join_keys,
+                "foreign_keys": foreign_keys
+            },
+            "message": f"Schema for '{table_name}' with {len(columns)} columns. Identified {len(join_keys)} potential join keys."
         })
+
     except Exception as e:
         logger.error("Describe table failed", table=table_name, error=str(e))
         return json.dumps({"status": "error", "message": str(e)})
@@ -205,7 +225,7 @@ def cache_dashboard_metric(metric_key: str, status: str, reason: str) -> str:
 
 
 @tool(args_schema=SearchTranscriptsSchema)
-def search_meeting_transcripts(query: str, user_id: Optional[int] = None) -> str:
+def search_meeting_transcripts(query: str, user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Searches meeting transcripts for a specific keyword, person, or topic.
     Returns matching snippets and meeting dates.
@@ -215,15 +235,17 @@ def search_meeting_transcripts(query: str, user_id: Optional[int] = None) -> str
 
     try:
         # We search raw_text for the query. 
-        # RBAC: Join with projects to ensure user_id matches.
+        # RBAC: Join with projects to ensure user_id matches (Skip for ADMIN).
         sql = f"""
             SELECT mt.meeting_date, mt.raw_text, p.project_name
             FROM meeting_transcripts mt
             JOIN projects p ON mt.project_id = p.project_id
             WHERE (mt.raw_text LIKE '%{query}%')
-            AND p.user_id = {user_id}
-            LIMIT 5
         """
+        if role != "ADMIN":
+            sql += f" AND p.user_id = {user_id}"
+        
+        sql += " LIMIT 5"
         with get_db_connection(read_only=True) as conn:
             rows = conn.execute(sql).fetchall()
             data = []

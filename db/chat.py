@@ -38,7 +38,7 @@ def save_chat_message(thread_id: str, role: str, content: str, metadata: Optiona
         conn.commit()
 
 
-def get_chat_history(thread_id: str, user_id: Optional[int] = None) -> List[Dict[str, any]]:
+def get_chat_history(thread_id: str, user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, any]]:
     with get_db_connection() as conn:
         query = """
             SELECT m.role, m.content AS message, m.created_at AS timestamp, m.metadata
@@ -47,7 +47,7 @@ def get_chat_history(thread_id: str, user_id: Optional[int] = None) -> List[Dict
             WHERE m.thread_id = ?
         """
         params = [thread_id]
-        if user_id is not None:
+        if user_id is not None and role != "ADMIN":
             query += " AND t.user_id = ?"
             params.append(user_id)
         
@@ -70,7 +70,7 @@ def get_chat_history(thread_id: str, user_id: Optional[int] = None) -> List[Dict
     return results
 
 
-def get_chat_threads(limit: int = 50, user_id: Optional[int] = None) -> List[Dict[str, Optional[str]]]:
+def get_chat_threads(limit: int = 50, user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Optional[str]]]:
     with get_db_connection() as conn:
         query = """
             SELECT
@@ -84,7 +84,7 @@ def get_chat_threads(limit: int = 50, user_id: Optional[int] = None) -> List[Dic
             FROM chat_threads t
         """
         params = []
-        if user_id is not None:
+        if user_id is not None and role != "ADMIN":
             query += " WHERE t.user_id = ?"
             params.append(user_id)
         
@@ -102,11 +102,11 @@ def delete_chat_thread(thread_id: str) -> None:
         conn.commit()
 
 
-def thread_exists(thread_id: str, user_id: Optional[int] = None) -> bool:
+def thread_exists(thread_id: str, user_id: Optional[int] = None, role: str = "USER") -> bool:
     with get_db_connection() as conn:
         query = "SELECT 1 FROM chat_threads WHERE thread_id = ?"
         params = [thread_id]
-        if user_id is not None:
+        if user_id is not None and role != "ADMIN":
             query += " AND user_id = ?"
             params.append(user_id)
         

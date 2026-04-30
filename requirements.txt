@@ -43,3 +43,5 @@ html2image>=2.0.5
 
 # Observability
 structlog==24.4.0
+
+argon2_cffi

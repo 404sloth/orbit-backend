@@ -30,11 +30,12 @@ def report_node(state: GraphState, config: RunnableConfig) -> dict:
 
 
     username = config.get("configurable", {}).get("username", "Executive")
+    role = config.get("configurable", {}).get("role", "USER")
 
     sys_msg = f"""You are the Executive Report Agent. 
 Your job is to generate professional documents (PDF, DOCX) or data spreadsheets (Excel).
 
-CURRENT USER: {username}
+CURRENT USER: {username} (Role: {role})
 
 CAPABILITIES:
 1. SQL: Use execute_read_query to fetch data from the database.

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # Database
     db_path: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "orbits.db")
 
+    # Security
+    secret_key: str = "super_secret_dev_key"
+    access_token_expire_minutes: int = 1440
+    refresh_token_expire_days: int = 7
+
     # LangSmith Tracing
     langchain_tracing_v2: str = "true"
     langchain_endpoint: str = "https://api.smith.langchain.com"

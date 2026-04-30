@@ -12,7 +12,7 @@ from tools.rag import search_project_documents
 from core.logger import logger
 
 @tool(args_schema=KnowledgeSearchSchema)
-def hybrid_knowledge_search(query: str, user_id: Optional[int] = None, depth: str = "balanced") -> str:
+def hybrid_knowledge_search(query: str, user_id: Optional[int] = None, role: str = "USER", depth: str = "balanced") -> str:
     """
     Performs a dual search across the SQL database and RAG document store.
     Use this for high-level queries like "What do we know about Project X?" 
@@ -31,25 +31,25 @@ def hybrid_knowledge_search(query: str, user_id: Optional[int] = None, depth: st
         # 1. SQL Metadata Search (Projects, Vendors, Clients, Transcripts)
         # Search for projects
         sql_proj = f"SELECT 'Project' as type, project_name as name, current_status as info FROM projects WHERE project_name LIKE '%{query}%'"
-        res_proj = json.loads(execute_read_query.invoke({"query": sql_proj, "user_id": user_id}))
+        res_proj = json.loads(execute_read_query.invoke({"query": sql_proj, "user_id": user_id, "role": role}))
         if res_proj["status"] == "success":
             results["structured_data"].extend(res_proj["data"])
 
         # Search for transcripts (NEW)
         sql_trans = f"SELECT 'Transcript' as type, title as name, substr(raw_text, 1, 200) || '...' as info FROM meeting_transcripts WHERE raw_text LIKE '%{query}%' OR title LIKE '%{query}%'"
-        res_trans = json.loads(execute_read_query.invoke({"query": sql_trans, "user_id": user_id}))
+        res_trans = json.loads(execute_read_query.invoke({"query": sql_trans, "user_id": user_id, "role": role}))
         if res_trans["status"] == "success":
             results["structured_data"].extend(res_trans["data"])
 
         # 2. RAG Search
         if depth in ["balanced", "deep"]:
-            rag_res_json = search_project_documents.invoke({"query": query, "user_id": user_id, "scope": "global"})
+            rag_res_json = search_project_documents.invoke({"query": query, "user_id": user_id, "role": role, "scope": "global"})
             rag_res = json.loads(rag_res_json)
             if rag_res["status"] == "success":
                 results["documents"].extend(rag_res["data"])
             
             # Also search personal/workspace if appropriate
-            rag_res_personal_json = search_project_documents.invoke({"query": query, "user_id": user_id, "scope": "personal"})
+            rag_res_personal_json = search_project_documents.invoke({"query": query, "user_id": user_id, "role": role, "scope": "personal"})
             rag_res_personal = json.loads(rag_res_personal_json)
             if rag_res_personal["status"] == "success":
                 results["documents"].extend(rag_res_personal["data"])

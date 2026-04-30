@@ -8,10 +8,11 @@ from datetime import datetime, timedelta
 from langchain_core.tools import tool
 from db.client import get_db_connection
 from core.logger import logger
+from services.credit_service import CreditService
 
 
 @tool
-def generate_executive_summary(time_period_days: int = 30) -> str:
+def generate_executive_summary(time_period_days: int = 30, user_id: Optional[int] = None) -> str:
     """
     Generate executive summary for the specified time period.
     
@@ -109,6 +110,10 @@ def generate_executive_summary(time_period_days: int = 30) -> str:
             if not recommendations:
                 recommendations.append("Continue current tracking and monitoring")
             
+            # --- Credit Deduction ---
+            if user_id:
+                CreditService.deduct_credits(user_id, None, "Executive Summary Generation", 5.0, "TASK")
+
             return json.dumps({
                 "status": "success",
                 "data": {
@@ -137,7 +142,7 @@ def generate_executive_summary(time_period_days: int = 30) -> str:
 
 
 @tool
-def generate_project_status_report(project_id: int) -> str:
+def generate_project_status_report(project_id: int, user_id: Optional[int] = None) -> str:
     """
     Generate detailed status report for a specific project.
     
@@ -238,6 +243,10 @@ def generate_project_status_report(project_id: int) -> str:
             if not issues:
                 issues.append("No critical issues identified")
             
+            # --- Credit Deduction ---
+            if user_id:
+                CreditService.deduct_credits(user_id, project_id, f"Project Status Report: {proj_name}", 5.0, "TASK")
+
             return json.dumps({
                 "status": "success",
                 "data": {

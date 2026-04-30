@@ -14,7 +14,7 @@ from core.exceptions import RetrievalError
 
 
 @tool(args_schema=SearchDocumentsSchema)
-def search_project_documents(query: str, top_k: int = 3, scope: str = "global", user_id: Optional[int] = None) -> str:
+def search_project_documents(query: str, top_k: int = 3, scope: str = "global", user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Searches the ChromaDB knowledge base for project documents,
     meeting transcripts, and RFPs using semantic similarity.
@@ -33,21 +33,29 @@ def search_project_documents(query: str, top_k: int = 3, scope: str = "global", 
         if scope == "personal":
             if not user_id:
                 return json.dumps({"status": "error", "message": "User ID required for personal scope."})
-            metadata_filter = {
-                "$and": [
-                    {"user_id": {"$eq": user_id}},
-                    {"scope": {"$eq": "personal"}}
-                ]
-            }
+            
+            if role == "ADMIN":
+                metadata_filter = {"scope": {"$eq": "personal"}}
+            else:
+                metadata_filter = {
+                    "$and": [
+                        {"user_id": {"$eq": user_id}},
+                        {"scope": {"$eq": "personal"}}
+                    ]
+                }
         elif scope == "workspace":
             if not user_id:
                 return json.dumps({"status": "error", "message": "User ID required for workspace scope."})
-            metadata_filter = {
-                "$and": [
-                    {"user_id": {"$eq": user_id}},
-                    {"scope": {"$eq": "workspace"}}
-                ]
-            }
+            
+            if role == "ADMIN":
+                metadata_filter = {"scope": {"$eq": "workspace"}}
+            else:
+                metadata_filter = {
+                    "$and": [
+                        {"user_id": {"$eq": user_id}},
+                        {"scope": {"$eq": "workspace"}}
+                    ]
+                }
         else: # Default to global
             metadata_filter = {"scope": {"$eq": "global"}}
             
@@ -85,7 +93,7 @@ def search_project_documents(query: str, top_k: int = 3, scope: str = "global", 
 
 
 @tool(args_schema=AddDocumentsSchema)
-def add_documents_to_knowledge_base(content: str, source: str, scope: str = "global", user_id: Optional[int] = None) -> str:
+def add_documents_to_knowledge_base(content: str, source: str, scope: str = "global", user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Ingests new documents into the ChromaDB vector knowledge base with metadata scoping.
     """

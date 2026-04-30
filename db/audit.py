@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from core.logger import logger
 from db.client import get_db_connection
 
-def get_access_gaps(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_access_gaps(user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Any]]:
     """
     Fetches access gaps, optionally filtered by the project owner (user_id).
     """
@@ -25,7 +25,7 @@ def get_access_gaps(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
             JOIN permissions perm ON ag.permission_id = perm.permission_id
             """
             params = []
-            if user_id is not None:
+            if user_id is not None and role != "ADMIN":
                 # Filter by the user who owns the project or the user who the gap belongs to
                 query += " WHERE ag.user_id = ?"
                 params.append(user_id)

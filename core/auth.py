@@ -12,18 +12,19 @@ from dataclasses import dataclass
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr, validator, Field
+from pydantic import BaseModel, EmailStr, field_validator, Field
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
 from db.client import get_db_connection
 from core.logger import logger
+from core.config import settings
 
 # Security Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
+SECRET_KEY = settings.secret_key
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
 
 # Password Security - using argon2 (more secure, no 72-byte limit)
 pwd_context = CryptContext(
@@ -68,7 +69,8 @@ class UserCreate(UserBase):
     """Schema for creating a new user."""
     password: str = Field(..., description="Strong password for the new account.")
 
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def password_strength(cls, v):
         if len(v) < MIN_PASSWORD_LENGTH:
             raise ValueError(f'Password must be at least {MIN_PASSWORD_LENGTH} characters long')

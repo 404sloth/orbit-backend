@@ -2,7 +2,7 @@ import sqlite3
 from typing import List, Dict, Any, Optional
 from db.client import get_db_connection
 
-def get_all_projects(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_all_projects(user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Any]]:
     """
     Fetch all projects with their basic info and SOW dates, filtered by user.
     """
@@ -32,7 +32,7 @@ def get_all_projects(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
             LEFT JOIN statements_of_work s ON p.project_id = s.project_id
         """
         params = []
-        if user_id is not None:
+        if user_id is not None and role != "ADMIN":
             query += " WHERE p.user_id = ?"
             params.append(user_id)
             
@@ -46,15 +46,15 @@ def get_all_projects(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         projects.append(p)
     return projects
 
-def get_project_timeline(project_id: str, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_project_timeline(project_id: str, user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Any]]:
     """
     Fetch a unified timeline of meetings and milestones for a project, verified by user access.
     """
     timeline = []
     
     with get_db_connection() as conn:
-        # Security check: Ensure the project belongs to the user
-        if user_id is not None:
+        # Security check: Ensure the project belongs to the user (Skip for ADMIN)
+        if user_id is not None and role != "ADMIN":
             access_check = conn.execute("SELECT 1 FROM projects WHERE project_id = ? AND user_id = ?", (project_id, user_id)).fetchone()
             if not access_check:
                 return []
@@ -113,7 +113,7 @@ def get_project_timeline(project_id: str, user_id: Optional[int] = None) -> List
     timeline.sort(key=lambda x: x['date'] or '', reverse=True)
     return timeline
 
-def get_pending_notifications(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_pending_notifications(user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Any]]:
     """
     Fetch meeting transcripts that are PENDING processing, scoped to the user.
     """
@@ -130,7 +130,7 @@ def get_pending_notifications(user_id: Optional[int] = None) -> List[Dict[str, A
             WHERE t.processing_status = 'PENDING'
         """
         params = []
-        if user_id is not None:
+        if user_id is not None and role != "ADMIN":
             query += " AND p.user_id = ?"
             params.append(user_id)
             
