@@ -38,7 +38,7 @@ class CreditService:
                 """
                 usage_params = []
                 if role != "ADMIN":
-                    usage_query += " WHERE ct.user_id = ?"
+                    usage_query += " WHERE p.user_id = ?"
                     usage_params.append(user_id)
                 
                 usage_query += " GROUP BY ct.project_id"
@@ -50,15 +50,16 @@ class CreditService:
                 
                 # 3. Get Recent Transactions (Role Aware)
                 tx_query = """
-                    SELECT task_name, credits_used, timestamp, source_type, details
-                    FROM credit_transactions
+                    SELECT ct.task_name, ct.credits_used, ct.timestamp, ct.source_type, ct.details
+                    FROM credit_transactions ct
+                    LEFT JOIN projects p ON ct.project_id = p.project_id
                 """
                 tx_params = []
                 if role != "ADMIN":
-                    tx_query += " WHERE user_id = ?"
-                    tx_params.append(user_id)
+                    tx_query += " WHERE ct.user_id = ? OR p.user_id = ?"
+                    tx_params.extend([user_id, user_id])
                 
-                tx_query += " ORDER BY timestamp DESC LIMIT 10"
+                tx_query += " ORDER BY ct.timestamp DESC LIMIT 10"
                 
                 cursor = conn.execute(tx_query, tx_params)
                 summary["recentTransactions"] = [
