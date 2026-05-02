@@ -26,8 +26,8 @@ def get_access_gaps(user_id: Optional[int] = None, role: str = "USER") -> List[D
             """
             params = []
             if user_id is not None and role != "ADMIN":
-                # Filter by the user who owns the project or the user who the gap belongs to
-                query += " WHERE ag.user_id = ?"
+                # Show gaps for projects that the current user manages
+                query += " WHERE p.user_id = ?"
                 params.append(user_id)
             
             query += " ORDER BY ag.created_at DESC"
@@ -58,3 +58,18 @@ def get_access_gaps(user_id: Optional[int] = None, role: str = "USER") -> List[D
     except Exception as e:
         logger.error(f"Failed to fetch access gaps: {e}")
         return []
+def resolve_access_gap(gap_id: int) -> bool:
+    """
+    Mark an access gap as resolved.
+    """
+    try:
+        with get_db_connection(read_only=False) as conn:
+            cursor = conn.execute(
+                "UPDATE access_gaps SET status = 'resolved' WHERE gap_id = ?",
+                (gap_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to resolve access gap: {e}")
+        return False

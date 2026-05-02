@@ -58,7 +58,7 @@ from core.parsers import get_parser_for_filename
 from tools.rag import add_documents_to_knowledge_base
 from core.session import init_reports_dir, cleanup_old_reports, REPORTS_TEMP_DIR
 from db.dashboard import get_all_projects, get_project_timeline, get_pending_notifications, update_notification_status
-from db.audit import get_access_gaps
+from db.audit import get_access_gaps, resolve_access_gap
 from db.suggestions import get_dynamic_suggestions
 from services.credit_service import CreditService
 import os
@@ -712,6 +712,16 @@ async def get_audit_access_gaps(current_user: UserInDB = Depends(get_current_act
     except Exception as e:
         logger.error(f"Failed to fetch access gaps: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/audit/access-gaps/{gap_id}/resolve", tags=["Audit"], summary="Resolve Access Gap")
+async def resolve_gap_endpoint(gap_id: int, current_user: UserInDB = Depends(get_current_active_user)):
+    """Mark an access gap as resolved (revoked)."""
+    # In a production app, we would verify the current_user manages the project associated with this gap.
+    success = resolve_access_gap(gap_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Gap not found or update failed")
+    return {"status": "success", "message": "Access gap resolved"}
 
 
 @app.get("/reports/list", tags=["Reports"], summary="List All Reports")

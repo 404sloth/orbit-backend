@@ -16,8 +16,6 @@ else
     exit 1
 fi
 
-cd app
-
 # Run the backend server
 echo "Backend running on: http://localhost:8000"
 echo "API Docs: http://localhost:8000/docs"
