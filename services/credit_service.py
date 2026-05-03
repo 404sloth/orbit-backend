@@ -37,7 +37,7 @@ class CreditService:
                     JOIN projects p ON ct.project_id = p.project_id
                 """
                 usage_params = []
-                if role != "ADMIN":
+                if user_id is not None:
                     usage_query += " WHERE p.user_id = ?"
                     usage_params.append(user_id)
                 
@@ -55,7 +55,7 @@ class CreditService:
                     LEFT JOIN projects p ON ct.project_id = p.project_id
                 """
                 tx_params = []
-                if role != "ADMIN":
+                if user_id is not None:
                     tx_query += " WHERE ct.user_id = ? OR p.user_id = ?"
                     tx_params.extend([user_id, user_id])
                 

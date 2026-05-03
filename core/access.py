@@ -14,12 +14,16 @@ class AccessManager:
     def can_access_table(user_id: int, role: str, table_name: str) -> bool:
         """
         Checks if a user has permission to read from a specific table.
-        ADMINs can access everything.
+        ADMINs and ANALYSTs can access most business tables.
         """
-        if role == "ADMIN":
+        if role in ["ADMIN", "ANALYST"]:
+            # Even ANALYSTs shouldn't see raw security logs or user management tables directly
+            restricted_tables = ["security_events", "users", "permissions", "user_permissions"]
+            if role == "ANALYST" and table_name in restricted_tables:
+                return False
             return True
 
-        # Define table-level restrictions
+        # Define table-level restrictions for regular users
         restricted_tables = ["security_events", "users", "permissions", "user_permissions"]
         if table_name in restricted_tables:
             return False
@@ -29,9 +33,8 @@ class AccessManager:
 
     @staticmethod
     def can_access_thread(user_id: int, role: str, thread_id: str) -> bool:
-        """Checks if a user owns a chat thread or is an ADMIN."""
-        if role == "ADMIN":
-            return True
+        """Checks if a user owns a chat thread."""
+        # Strict isolation: ADMINs/ANALYSTs only see their own threads
 
         try:
             with get_db_connection() as conn:
@@ -46,9 +49,10 @@ class AccessManager:
 
     @staticmethod
     def can_access_project(user_id: int, role: str, project_id: int) -> bool:
-        """Checks if a user is assigned to a project or is an ADMIN."""
-        if role == "ADMIN":
-            return True
+        """Checks if a user is assigned to a project."""
+        # Strict isolation: ADMINs/ANALYSTs only see their own projects
+        # if role in ["ADMIN", "ANALYST"]:
+        #     return True
 
         try:
             with get_db_connection() as conn:

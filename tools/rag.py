@@ -13,13 +13,19 @@ from core.logger import logger
 from core.exceptions import RetrievalError
 
 
+from langchain_core.runnables import RunnableConfig
+
 @tool(args_schema=SearchDocumentsSchema)
-def search_project_documents(query: str, top_k: int = 3, scope: str = "global", user_id: Optional[int] = None, role: str = "USER") -> str:
+def search_project_documents(query: str, config: RunnableConfig, top_k: int = 3, scope: str = "global", user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Searches the ChromaDB knowledge base for project documents,
     meeting transcripts, and RFPs using semantic similarity.
-    Supports scoping for personal, workspace, or global documents.
+    Uses config to automatically retrieve user context if not provided.
     """
+    # Prefer values from config if available
+    cfg_user_id = config.get("configurable", {}).get("user_id")
+    actual_user_id = user_id if user_id is not None else cfg_user_id
+    user_id = actual_user_id
     try:
         vector_store = get_vector_store()
         
@@ -34,32 +40,27 @@ def search_project_documents(query: str, top_k: int = 3, scope: str = "global", 
             if not user_id:
                 return json.dumps({"status": "error", "message": "User ID required for personal scope."})
             
-            if role == "ADMIN":
-                metadata_filter = {"scope": {"$eq": "personal"}}
-            else:
-                metadata_filter = {
-                    "$and": [
-                        {"user_id": {"$eq": user_id}},
-                        {"scope": {"$eq": "personal"}}
-                    ]
-                }
+            metadata_filter = {
+                "$and": [
+                    {"user_id": {"$eq": user_id}},
+                    {"scope": {"$eq": "personal"}}
+                ]
+            }
         elif scope == "workspace":
             if not user_id:
                 return json.dumps({"status": "error", "message": "User ID required for workspace scope."})
             
-            if role == "ADMIN":
-                metadata_filter = {"scope": {"$eq": "workspace"}}
-            else:
-                metadata_filter = {
-                    "$and": [
-                        {"user_id": {"$eq": user_id}},
-                        {"scope": {"$eq": "workspace"}}
-                    ]
-                }
+            metadata_filter = {
+                "$and": [
+                    {"user_id": {"$eq": user_id}},
+                    {"scope": {"$eq": "workspace"}}
+                ]
+            }
         else: # Default to global
             metadata_filter = {"scope": {"$eq": "global"}}
             
-        docs = vector_store.similarity_search(query, k=k_val, filter=metadata_filter)
+        # Use MMR for more diverse results
+        docs = vector_store.max_marginal_relevance_search(query, k=k_val, fetch_k=k_val*3, filter=metadata_filter)
 
         if not docs:
             return json.dumps({
@@ -68,20 +69,21 @@ def search_project_documents(query: str, top_k: int = 3, scope: str = "global", 
                 "message": f"No relevant documents found in {scope} scope."
             })
 
-        results = [
-            {
-                "source": d.metadata.get("source", "Unknown"),
-                "scope": d.metadata.get("scope", "global"),
-                "content": d.page_content
-            }
-            for d in docs
-        ]
+        # Format results compactly
+        formatted_lines = []
+        for i, d in enumerate(docs, 1):
+            source = d.metadata.get("source", "Unknown")
+            scope = d.metadata.get("scope", "global")
+            # Explicitly format the citation tag so the agent learns to use it
+            formatted_lines.append(f"[Document {i} | Source: {source} | Scope: {scope}]\n{d.page_content}\n")
+        
+        result_str = "\n".join(formatted_lines)
 
-        logger.info("RAG search completed", query=query, scope=scope, results_count=len(results))
+        logger.info("RAG search completed", query=query, scope=scope, results_count=len(docs))
         return json.dumps({
             "status": "success",
-            "data": results,
-            "message": f"Found {len(results)} relevant documents in {scope} scope."
+            "data": result_str,
+            "message": f"Found {len(docs)} diverse relevant documents in {scope} scope."
         })
     except Exception as e:
         logger.error("RAG Search Error", error=str(e), query=query)
@@ -93,10 +95,14 @@ def search_project_documents(query: str, top_k: int = 3, scope: str = "global", 
 
 
 @tool(args_schema=AddDocumentsSchema)
-def add_documents_to_knowledge_base(content: str, source: str, scope: str = "global", user_id: Optional[int] = None, role: str = "USER") -> str:
+def add_documents_to_knowledge_base(content: str, source: str, config: RunnableConfig, scope: str = "global", user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Ingests new documents into the ChromaDB vector knowledge base with metadata scoping.
+    Uses config to automatically retrieve user context if not provided.
     """
+    cfg_user_id = config.get("configurable", {}).get("user_id")
+    actual_user_id = user_id if user_id is not None else cfg_user_id
+    user_id = actual_user_id
     try:
         vector_store = get_vector_store()
         metadata = {

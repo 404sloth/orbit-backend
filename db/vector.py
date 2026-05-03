@@ -10,9 +10,11 @@ def get_vector_store() -> Chroma:
     Initializes and returns the Chroma Vector Store using local Ollama embeddings.
     Ensure Ollama is running and `ollama pull nomic-embed-text` has been executed.
     """
+    from core.config import settings
+    
     embeddings = OllamaEmbeddings(
         model="nomic-embed-text", 
-        base_url="http://127.0.0.1:11434"
+        base_url=settings.ollama_base_url
     )
     
     return Chroma(

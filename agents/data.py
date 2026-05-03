@@ -16,6 +16,7 @@ from tools.sql import (
     describe_table_schema,
     cache_dashboard_metric,
 )
+from services.schema_cache import get_cached_schema
 
 
 def sql_node(state: GraphState, config: RunnableConfig) -> dict:
@@ -42,25 +43,28 @@ def sql_node(state: GraphState, config: RunnableConfig) -> dict:
     username = config.get("configurable", {}).get("username", "Executive")
     role = config.get("configurable", {}).get("role", "USER")
     
-    # Retrieve dynamic schema summary (reduced size for TPM limits)
-    table_names = get_table_names()
-    tables_list = ", ".join(table_names)
+    # Retrieve background cached schema
+    cached_schema = get_cached_schema()
+    tables_list = cached_schema.get("tables_csv", "")
+    detailed_schema = cached_schema.get("detailed_schema", "No details available.")
 
     sys_msg = f"""You are the Data Analyst Agent for an executive project dashboard.
 Your job is to answer questions by querying the project database accurately.
 
 SECURITY CONTEXT:
 - CURRENT USER: {username} (ID: {user_id}, Role: {role})
-- PRIVACY RULE: {"As an ADMIN, you have full access to all projects and data." if role == "ADMIN" else f"You MUST filter all queries to the 'projects', 'clients', 'chat_threads', 'chat_history', 'access_gaps', 'user_credits', and 'credit_transactions' tables by 'user_id = {user_id}'."}
-- DATA ISOLATION: {"You can see everything." if role == "ADMIN" else "Never return or query data belonging to other user IDs. If a user asks for data outside their scope, politely state that no such project or client was found."}
+- PRIVACY RULE: You MUST filter all queries to the 'projects', 'clients', 'chat_threads', 'chat_history', 'access_gaps', 'user_credits', and 'credit_transactions' tables by 'user_id = {user_id}'.
+- DATA ISOLATION: Never return or query data belonging to other user IDs. If a user asks for data outside their scope, politely state that no such project or client was found for their account.
 
 MISSION CRITICAL:
-1. ALWAYS fetch table names using 'list_database_tables' if you are unsure about the structure.
-2. ALWAYS call 'describe_table_schema' for EVERY table in your query BEFORE calling 'execute_read_query'.
-3. NEVER assume column names or types. Verify them every time.
+1. You have been provided the database schema below. Use it to construct your queries directly.
+2. Only call 'describe_table_schema' if you get a SQL error and need more details about foreign keys.
+3. NEVER assume column names or types not listed in the schema.
 
-DATABASE CONTEXT:
+DATABASE SCHEMA:
 The database contains the following tables: [{tables_list}].
+Here are the columns for each table:
+{detailed_schema}
 
 
 CORE TABLES & SCHEMA MAP:
@@ -82,10 +86,15 @@ CORE DOMAIN KNOWLEDGE - CREDIT POOL:
 - BILLING: Vendor bills are offset by available credits in the pool before generating a payable amount.
 
 STRICT RESPONSE RULES:
-- NEVER use placeholders like '[Insert Name]' or '[Insert Credits]'. 
-- If a query fails with 'no such column', ALWAYS use 'describe_table_schema' on that table to verify column names.
-- If a query returns no data, state clearly: "I searched for X but found no matching records for your account."
-- ALWAYS provide the REAL DATA retrieved from the database.
+- Professional, executive-grade responses only.
+- ALWAYS present data in a clean Markdown TABLE if you find more than one record.
+- NEVER use ASCII dividers or decorative lines like '======' or '------'. They break the UI.
+- DO NOT mention technical details like "filtering by user_id" or "restricted tables" unless a query actually fails.
+- If you find data, show it immediately.
+- Use bold headers for key metrics.
+- NEVER use placeholders like '[Insert Name]'. 
+- If a query fails with 'no such column', ALWAYS use 'describe_table_schema'.
+- If a query returns no data, state clearly: "No matching records found for your account."
 
 
 
@@ -99,17 +108,16 @@ AVAILABLE TOOLS:
 STRICT TOOL CALLING RULES:
 - Use ONLY standard ASCII straight double-quotes (") for JSON keys and strings.
 - NEVER use curly quotes (“ or ”).
-- NEVER wrap tool calls in XML-like tags like <function=...>. 
-- Ensure all JSON is perfectly formatted.
+- NEVER wrap tool calls in XML-like tags like <function=...>. RESTRICTIONS:
+- DO NOT attempt to query the 'users', 'permissions', or 'security_events' tables. They are restricted for security reasons.
+- All your queries will be automatically filtered by 'user_id' for the current user.
 
 WORKFLOW (STRICT MULTI-STEP PROCESS):
-1. DISCOVERY: If you are unsure which tables to use, ALWAYS call 'list_database_tables' first.
-2. INSPECTION: For EVERY table you plan to use in a query (including JOINs), you MUST call 'describe_table_schema' to get the exact column names and FOREIGN KEY constraints. NEVER assume a column exists based on common sense.
-3. ANALYSIS: Look for join keys (e.g., project_id, user_id) in the DDL to ensure your JOINs are correct.
-4. EXECUTION: Only after you have the verified schema, call 'execute_read_query' with explicit column names.
-5. RECOVERY: If a query fails with 'no such column', repeat step 2 for that table.
-6. MONITOR: If you find critical/at-risk items, use cache_dashboard_metric to flag them.
-
+1. DISCOVERY: Look at the DATABASE SCHEMA above. 
+2. EXECUTION: Call 'execute_read_query' with explicit column names. PREFER 'LEFT JOIN' over inner joins to ensure project data is returned even if related tables (like credits) are empty.
+3. PARTIAL RESULTS: If a complex join returns no data, RE-TRY with a simpler query on just the primary table (e.g., 'projects') to ensure the user gets at least basic information.
+4. RECOVERY: If a query fails with 'no such column', call 'describe_table_schema'.
+5. MONITOR: If you find critical items, use cache_dashboard_metric.
 """
 
     try:
@@ -124,42 +132,39 @@ WORKFLOW (STRICT MULTI-STEP PROCESS):
         except Exception:
             pass
 
-        # ROOT FIX: Prune messages to stay within Groq TPM limits
-        all_messages = state["messages"]
-        if len(all_messages) > 12:
-            pruned_messages = [all_messages[0]] + list(all_messages[-10:])
-        else:
-            pruned_messages = list(all_messages)
+        # Filter for standard messages to ensure LLM compatibility (especially for Groq)
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+        raw_messages = state.get("messages", [])
+        pruned_messages = [
+            m for m in raw_messages 
+            if isinstance(m, (HumanMessage, AIMessage, SystemMessage, ToolMessage))
+        ]
 
         # Capture original length BEFORE invocation to avoid mutation bugs
-        # We use the length of pruned_messages because that's what the agent executor starts with
         pruned_len = len(pruned_messages)
-        result = agent_executor.invoke({"messages": pruned_messages})
+        result = agent_executor.invoke({"messages": pruned_messages}, config=config)
 
-        # Return only new messages generated by this agent
+        # Return only new AI messages to keep the global state clean
         all_messages_after = result["messages"]
+        new_messages = []
         if len(all_messages_after) > pruned_len:
-            new_messages = all_messages_after[pruned_len:]
-        else:
-            # If for some reason it's shorter or same length, assume no new messages
-            new_messages = []
+            # Only keep the FINAL response to avoid dangly tool_call metadata
+            from langchain_core.messages import AIMessage
+            final_msg = all_messages_after[-1]
+            if isinstance(final_msg, AIMessage):
+                clean_m = AIMessage(content=final_msg.content)
+                new_messages.append(clean_m)
         
-        logger.info(
-            "SQL Agent finished",
-            in_count=len(state["messages"]),
-            out_count=len(all_messages_after),
-            new_count=len(new_messages)
-        )
-        
-        # If the agent produced no new messages, it might be stuck or 
-        # think it already answered. Add a fallback message to break loops.
         if not new_messages:
+            # Fallback if no AI message was produced
             from langchain_core.messages import SystemMessage
-            new_messages = [SystemMessage(content="[SYSTEM] SQL Agent reviewed the history and found no new actions needed.")]
+            new_messages = [SystemMessage(content="[SYSTEM] SQL Agent reviewed the data but produced no final summary.")]
 
         return {"messages": new_messages}
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         logger.exception("SQL Agent execution failed")
         from langchain_core.messages import AIMessage
         err_msg = str(e) if str(e) else repr(e)

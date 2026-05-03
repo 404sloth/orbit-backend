@@ -6,6 +6,7 @@ import sqlite3
 import pathlib
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langchain_core.messages import RemoveMessage
 from core.state import GraphState
 from core.logger import logger
 from agents.router import supervisor_node
@@ -21,14 +22,31 @@ def human_approval_node(state: GraphState) -> dict:
     """Breakpoint node. LangGraph interrupts BEFORE this executes."""
     return {"messages": []}
 
+def trimmer_node(state: GraphState) -> dict:
+    """Centralized message trimmer to manage token limits and prevent stale context bias."""
+    messages = state.get("messages", [])
+    # Keep only the last 15 messages for a rolling context window
+    if len(messages) <= 15:
+        return {}
+    
+    # Identify messages to remove (everything except the last 15)
+    messages_to_remove = messages[:-15]
+    
+    # Only remove messages that have IDs (persisted messages)
+    removals = [RemoveMessage(id=m.id) for m in messages_to_remove if getattr(m, "id", None)]
+    
+    if removals:
+        logger.info("Trimmed stale messages from graph state", removed_count=len(removals))
+        return {"messages": removals}
+    return {}
 
 def build_workflow():
     """
     Builds and compiles the full Orbit agent graph.
 
     Architecture:
-        Entry → Supervisor → (sql | rag | human | report | image | FINISH)
-        Workers always route back to Supervisor for re-evaluation.
+        Entry → Trimmer → Supervisor → (sql | rag | human | report | image | FINISH)
+        Workers always route back to Trimmer to ensure context window is managed.
 
     Returns:
         A compiled LangGraph CompiledGraph with SQLite checkpointing.
@@ -36,6 +54,7 @@ def build_workflow():
     builder = StateGraph(GraphState)
 
     # Register nodes
+    builder.add_node("trimmer", trimmer_node)
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("sql", sql_node)
     builder.add_node("rag", rag_node)
@@ -45,15 +64,16 @@ def build_workflow():
     builder.add_node("image", image_node)
 
     # Entry point
-    builder.set_entry_point("supervisor")
+    builder.set_entry_point("trimmer")
+    builder.add_edge("trimmer", "supervisor")
 
-    # Worker → Supervisor edges (workers always report back)
-    builder.add_edge("sql", "supervisor")
-    builder.add_edge("rag", "supervisor")
-    builder.add_edge("hybrid", "supervisor")
-    builder.add_edge("human", "supervisor")
-    builder.add_edge("report", "supervisor")
-    builder.add_edge("image", "supervisor")
+    # Worker → Trimmer edges (workers always report back through trimmer)
+    builder.add_edge("sql", "trimmer")
+    builder.add_edge("rag", "trimmer")
+    builder.add_edge("hybrid", "trimmer")
+    builder.add_edge("human", "trimmer")
+    builder.add_edge("report", "trimmer")
+    builder.add_edge("image", "trimmer")
 
     # Supervisor conditional routing (using edges.py function)
     builder.add_conditional_edges(

@@ -9,12 +9,12 @@ DEFAULT_SUGGESTIONS = [
     "List all vendors with rating above 4.5."
 ]
 
-def get_dynamic_suggestions(thread_id: str) -> List[str]:
+def get_dynamic_suggestions(thread_id: str, user_id: int = None) -> List[str]:
     """
     Generate 5 suggestions based on the last conversation message.
     If no history, return default frequent queries.
     """
-    history = get_chat_history(thread_id)
+    history = get_chat_history(thread_id, user_id=user_id)
     if not history:
         return DEFAULT_SUGGESTIONS
 

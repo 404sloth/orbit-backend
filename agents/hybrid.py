@@ -57,27 +57,36 @@ PERSONALITY & TONE:
 
 SECURITY CONTEXT:
 - CURRENT USER: {username} (ID: {user_id}, Role: {role})
-- PRIVACY RULE: {"As an ADMIN, you have full access to all projects, clients, and documents." if role == "ADMIN" else f"For SQL, you MUST filter 'projects' and 'clients' by 'user_id = {user_id}'."}
-- DATA ISOLATION: {"You can see everything." if role == "ADMIN" else "Never reveal or query data belonging to other user IDs."}
+- PRIVACY RULE: You MUST filter all queries to 'projects' and 'clients' by 'user_id = {user_id}'.
+- DATA ISOLATION: Never reveal or query data belonging to other user IDs.
 
 DATABASE CONTEXT:
 Tables: [{tables_list}]. Use 'describe_table_schema' FIRST to understand columns.
+
+STRICT TOOL CALLING RULES:
+- Use ONLY standard ASCII straight double-quotes (") for JSON keys and strings.
+- NEVER use curly quotes (“ or ”).
+- NEVER wrap tool calls in XML-like tags like <function=...>. 
+- Call tools ONE AT A TIME. Do not attempt parallel tool calling.
+- Ensure all JSON is perfectly formatted.
 
 AVAILABLE TOOLS:
 1. SQL: execute_read_query (Focus on metrics: budget, dates, status).
 2. RAG: search_project_documents (Focus on context: notes, RFPs, documents).
 3. TRANSCRIPTS: search_meeting_transcripts (Focus on PEOPLE: "What did X say?", "Search discussions about Y").
-4. HYBRID: hybrid_knowledge_search (PREFER THIS for general discovery across both SQL and RAG).
+4. HYBRID: hybrid_knowledge_search (PREFER THIS for general discovery).
 5. DASHBOARD: cache_dashboard_metric (Pin critical findings to the Insight panel).
 6. DOCUMENTS: generate_executive_report (Create formal summaries/PDFs).
 
-WORKFLOW (STRATEGIC MULTI-STEP PROCESS):
-1. DISCOVERY: If the query is broad, start with 'hybrid_knowledge_search' or 'list_database_tables'.
-2. INSPECTION: For structured data (SQL), you MUST call 'describe_table_schema' for ALL candidate tables to identify exact columns and JOIN keys.
-3. INVESTIGATE: If the user mentions a PERSON, use 'search_meeting_transcripts' to find human context.
-4. SYNTHESIZE: Combine SQL metrics with RAG context. Explain WHY they matter. (e.g., "The database shows a status of 'Pending', and the April 12 transcript explains this is due to a delayed vendor signature.")
-5. FINALIZE: Present your findings in a professional, executive-grade summary.
-6. MONITOR: Use 'cache_dashboard_metric' for critical project risks discovered during analysis.
+WORKFLOW:
+1. DISCOVERY: If the query is broad, start with 'hybrid_knowledge_search'.
+2. INSPECTION: For SQL, you MUST call 'describe_table_schema' for candidate tables.
+3. INVESTIGATE: If a PERSON is mentioned, use 'search_meeting_transcripts'.
+4. SYNTHESIZE: Combine SQL metrics with RAG context. Explain WHY they matter.
+5. REPORT: If the user explicitly asks for a PDF or formal document, use 'generate_executive_report'.
+6. FINALIZE: Present your findings in a professional, executive-grade summary.
+   - NEVER use ASCII dividers like '======' or '------'.
+   - Use standard Markdown tables for data.
 """
 
 
@@ -93,22 +102,27 @@ WORKFLOW (STRATEGIC MULTI-STEP PROCESS):
         except Exception:
             pass
 
-        # Prune messages to stay within token limits
-        all_messages = state["messages"]
-        if len(all_messages) > 12:
-            pruned_messages = [all_messages[0]] + list(all_messages[-10:])
-        else:
-            pruned_messages = list(all_messages)
+        # Filter for standard messages to ensure LLM compatibility (especially for Groq)
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+        raw_messages = state.get("messages", [])
+        pruned_messages = [
+            m for m in raw_messages 
+            if isinstance(m, (HumanMessage, AIMessage, SystemMessage, ToolMessage))
+        ]
 
         pruned_len = len(pruned_messages)
-        result = agent_executor.invoke({"messages": pruned_messages})
+        result = agent_executor.invoke({"messages": pruned_messages}, config=config)
 
-        # Return only new messages
+        # Return only new AI messages to keep the global state clean
         all_messages_after = result["messages"]
+        new_messages = []
         if len(all_messages_after) > pruned_len:
-            new_messages = all_messages_after[pruned_len:]
-        else:
-            new_messages = []
+            # Only keep the FINAL response to avoid dangly tool_call metadata
+            from langchain_core.messages import AIMessage
+            final_msg = all_messages_after[-1]
+            if isinstance(final_msg, AIMessage):
+                clean_m = AIMessage(content=final_msg.content)
+                new_messages.append(clean_m)
         
         logger.info(
             "Strategic Intelligence Agent finished",

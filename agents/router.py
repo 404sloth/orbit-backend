@@ -68,6 +68,7 @@ def supervisor_node(state: GraphState) -> dict:
     Analyzes the user's request and routes to the best specialist agent.
     Includes confidence scoring, fallback chains, circuit breaker, and structured logging.
     """
+    logger.info("Supervisor node started", extra={"request_id": state.get("request_id")})
     start_time = time.time()
     request_id = state.get("request_id", "unknown")  # assume you inject request_id
     session_id = state.get("session_id", "unknown")
@@ -111,19 +112,34 @@ def supervisor_node(state: GraphState) -> dict:
         table_names = get_table_names()
         tables_csv = ", ".join(table_names) if table_names else "(no tables available)"
 
-        # Loop detection
+        # Pass standard messages to the LLM, filtering out internal LangGraph artifacts
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+        raw_messages = state.get("messages", [])
+
+        # Loop detection and termination
         previous_node = state.get("next_node")
         previous_reasoning = state.get("routing_reasoning")
+        
+        # If a specialist has already answered, we should likely FINISH
+        last_msg = raw_messages[-1] if raw_messages else None
+        has_final_answer = isinstance(last_msg, AIMessage) and not getattr(last_msg, "tool_calls", None)
+        
         loop_context = ""
         if previous_node and previous_node != "FINISH":
+            if has_final_answer:
+                logger.info("Specialist already provided final answer, forcing FINISH", node=previous_node)
+                return {
+                    "next_node": "FINISH",
+                    "routing_reasoning": f"Agent '{previous_node}' has already provided a final answer. Ending conversation.",
+                    "routing_confidence": 1.0,
+                    "fallback_nodes": None,
+                }
             loop_context = f"\nPREVIOUS DECISION: You routed to '{previous_node}' because: {previous_reasoning}. If that agent has already provided an answer, you MUST route to FINISH now."
 
-        # Message pruning for token limits
-        all_messages = state["messages"]
-        if len(all_messages) > 12:
-            pruned_messages = [all_messages[0]] + list(all_messages[-10:])
-        else:
-            pruned_messages = list(all_messages)
+        pruned_messages = [
+            m for m in raw_messages 
+            if isinstance(m, (HumanMessage, AIMessage, SystemMessage, ToolMessage))
+        ]
 
         # Enhanced system prompt with confidence scoring
         prompt = ChatPromptTemplate.from_messages([
@@ -135,37 +151,43 @@ CRITICAL INSTRUCTIONS:
 3. YOUR ONLY OUTPUT MUST BE A SINGLE, VALID JSON OBJECT.
 4. If you answer the user directly, you have FAILED your mission.
 
-AVAILABLE AGENTS & SPECIALIZED TOOLS:
-1. hybrid – Strategic Intelligence (PREFER THIS for complex analysis and searching for PEOPLE). 
-   Has access to 'hybrid_knowledge_search' and 'search_meeting_transcripts'.
-   Use for: "What did Arjun Mehta say?", "Compare project budget with meeting discussions", "Find everything related to vendor Y", and GENERAL CONVERSATION or guidance.
-2. sql – Data Analyst. Focuses on quantitative database queries: [{tables_csv}].
-   Use for ALL structured data: "Show me project status", "List action items", "What is the budget?".
-3. rag – Knowledge Agent. Semantic search in unstructured text: [meetings, transcripts, RFPs].
-   Use ONLY for text search: "What did we agree with vendor X?", "Summarise the compliance risks".
-4. human – Human Approval Gate. Use ONLY for irreversible actions like "Approve vendor", "Release payment".
-5. report – Report Generator. Use for: "report", "export", "excel", "PDF".
-6. image – Image Generator. Use for "generate image/chart" AFTER data is shown.
-7. FINISH – TASK IS DONE. Use ONLY when the specialist agent has already provided a final answer in the conversation history.
+AVAILABLE AGENTS & MISSION PARAMETERS:
+1. sql (Data Analyst): USE THIS for all structured data, lists, and quantitative metrics from the database (projects, credits, milestones).
+2. rag (Knowledge Agent): USE THIS for searching through unstructured documents, proposals, and project notes.
+3. hybrid (Strategic Intelligence): USE THIS for cross-functional analysis, people-centric queries (transcripts), and complex reasoning that combines SQL and RAG.
+4. report (Executive Report Agent): USE THIS EXCLUSIVELY for generating formal PDF, DOCX, or Excel documents/reports.
+5. image (Creative Agent): USE THIS for generating UI mockups, project logos, or visual assets.
+6. human (Advisory): USE THIS only if the request is highly ambiguous or requires human-in-the-loop approval.
+7. FINISH (Task Complete): USE THIS immediately once a specialist agent has provided a final answer.
 
-ROUTING RULES:{loop_context}
-- If the user asks a general question (e.g. "how to avoid robotic responses"), route to 'hybrid'.
-- If the query mentions PEOPLE (e.g. "Arjun Mehta"), route to 'hybrid'.
-- You MUST output a confidence score (0-1).
-- DO NOT route to the same node twice in a row.
+ROUTING RULES:
+- If the user asks to "Generate a report", "Export to Excel", or "Make a PDF", ROUTE TO 'report'.
+- If the user asks about project metrics or lists, ROUTE TO 'sql'.
+- If the last message is a final response from an agent, ROUTE TO 'FINISH'.
+- DO NOT answer the user yourself.
 
 RESPONSE FORMAT (STRICT JSON ONLY):
 {{{{
-  "next_node": "agent_name",
-  "confidence": 0.9,
-  "reasoning": "Brief technical explanation of why this route was selected.",
-  "fallback_nodes": ["optional_agent"]
+  "next_node": "sql" | "rag" | "hybrid" | "report" | "image" | "human" | "FINISH",
+  "confidence": 0.0 to 1.0,
+  "reasoning": "Specify exactly which data or tool is targeted.",
+  "fallback_nodes": ["optional"]
 }}}}
+{loop_context}
 """),
             ("placeholder", "{messages}")
         ])
 
         raw_result = (prompt | llm).invoke({"messages": pruned_messages})
+        if not raw_result or not raw_result.content.strip():
+            logger.warning("Supervisor received empty response from LLM")
+            return {
+                "next_node": "hybrid",
+                "routing_reasoning": "Supervisor failed to decide (empty response), falling back to hybrid specialist.",
+                "routing_confidence": 0.1,
+                "fallback_nodes": None,
+            }
+
         content = raw_result.content if hasattr(raw_result, "content") else str(raw_result)
         
         # Parse JSON robustly

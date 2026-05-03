@@ -17,22 +17,27 @@ def suggestion_node(state: GraphState) -> dict:
     
     llm = get_llm(temperature=0.7) # Higher temperature for variety
     
-    # Prune messages for context
-    all_messages = state["messages"]
-    context_messages = all_messages[-5:] if len(all_messages) > 5 else all_messages
+    # Prune and filter messages for Groq context compatibility
+    from langchain_core.messages import ToolMessage
+    raw_messages = state.get("messages", [])
+    standard_messages = [
+        m for m in raw_messages 
+        if isinstance(m, (HumanMessage, AIMessage, SystemMessage, ToolMessage))
+    ]
+    context_messages = standard_messages[-5:] if len(standard_messages) > 5 else standard_messages
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an executive assistant. Based on the conversation history, generate exactly 3 short, relevant, and proactive follow-up questions or actions that the user might want to take next.
-        
-Guidelines:
-- Keep them under 10 words each.
-- Be specific to the data or topics discussed.
-- If a report was just generated, suggest visualizing it or comparing it to other data.
-- If a problem was identified, suggest looking into the root cause.
-- Format your response as a JSON array of strings.
+        ("system", """You are an executive assistant. Based on the conversation history, generate exactly 3 short, relevant, and proactive follow-up questions.
 
-Example Output:
-["Show budget breakdown by vendor", "Compare with last month's status", "Identify top 3 at-risk milestones"]
+STRICT RULES:
+- YOUR OUTPUT MUST BE A SINGLE JSON ARRAY OF STRINGS.
+- DO NOT PROVIDE ANY INTRODUCTORY TEXT, EXPLANATIONS, OR CONVERSATIONAL FILLER.
+- Keep each suggestion under 10 words.
+- Be specific to the data or topics discussed.
+- If a report was just generated, suggest visualizing it or comparing it.
+
+RESPONSE FORMAT:
+["suggestion 1", "suggestion 2", "suggestion 3"]
 """),
         ("placeholder", "{messages}")
     ])

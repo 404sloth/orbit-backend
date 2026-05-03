@@ -61,7 +61,13 @@ from db.dashboard import get_all_projects, get_project_timeline, get_pending_not
 from db.audit import get_access_gaps, resolve_access_gap
 from db.suggestions import get_dynamic_suggestions
 from services.credit_service import CreditService
+from services.schema_cache import schema_cache_task, update_schema_cache
+from services.task_runner import task_runner
+from pydantic import BaseModel
 import os
+
+class BackgroundTaskRequest(BaseModel):
+    prompt: str
 
 from contextlib import asynccontextmanager
 
@@ -89,10 +95,15 @@ async def lifespan(app: FastAPI):
             
     cleanup_loop = asyncio.create_task(cleanup_task())
     
+    # Initialize schema cache and start background task
+    update_schema_cache()
+    schema_loop = asyncio.create_task(schema_cache_task())
+    
     yield  # Server runs here
     
     # Shutdown logic
     cleanup_loop.cancel()
+    schema_loop.cancel()
     logger.info("Orbit Backend shutting down.")
 
 app = FastAPI(
@@ -216,7 +227,8 @@ async def refresh_access_token(request: RefreshTokenRequest):
     Extends the user's session without requiring re-authentication.
     """
     try:
-        payload = jwt.decode(request.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        # HS256 with 30s leeway for clock drift
+        payload = jwt.decode(request.refresh_token, SECRET_KEY, algorithms=[ALGORITHM], options={"leeway": 30})
         username: str = payload.get("sub")
         role: str = payload.get("role")
         token_type: str = payload.get("type")
@@ -245,7 +257,8 @@ async def refresh_access_token(request: RefreshTokenRequest):
         return Token(
             access_token=access_token,
             token_type="bearer",
-            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
+            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            refresh_token=request.refresh_token
         )
 
     except JWTError:
@@ -267,13 +280,19 @@ async def chat_endpoint(request: ChatRequest, current_user: UserInDB = Depends(g
         prompt_length=len(request.prompt),
     )
 
-    thread_id = request.thread_id or str(uuid.uuid4())
-    create_thread(thread_id)
+    thread_id = request.thread_id
+    if thread_id:
+        if not thread_exists(thread_id, user_id=current_user.user_id, role=current_user.role):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized access to chat thread")
+    else:
+        thread_id = str(uuid.uuid4())
+        create_thread(thread_id, user_id=current_user.user_id)
     config = {
         "configurable": {
             "thread_id": thread_id,
             "user_id": current_user.user_id,
-            "username": current_user.username
+            "username": current_user.username,
+            "role": current_user.role
         },
         "recursion_limit": 10,
     }
@@ -295,13 +314,15 @@ async def chat_endpoint(request: ChatRequest, current_user: UserInDB = Depends(g
     initial_state = {
         "messages": [*existing_messages, HumanMessage(content=request.prompt)],
         "dashboard_data": current_state.values.get("dashboard_data", {}) if current_state is not None and current_state.values else {},
+        "next_node": None,
+        "routing_reasoning": None
     }
 
     try:
         # Check if graph is paused waiting for human approval
         if current_state is not None and getattr(current_state, "next", None) == ("human",):
             decision = request.prompt.strip().lower()
-            save_chat_message(thread_id, "user", request.prompt)
+            save_chat_message(thread_id, "user", request.prompt, user_id=current_user.user_id)
             if decision in ["approve", "reject"]:
                 logger.info("Received human decision.", decision=decision, thread_id=thread_id)
                 graph.update_state(
@@ -319,6 +340,7 @@ async def chat_endpoint(request: ChatRequest, current_user: UserInDB = Depends(g
                     thread_id=thread_id,
                     role="assistant",
                     content=final_ai_msg,
+                    user_id=current_user.user_id,
                     metadata={"reasoning": None}
                 )
 
@@ -335,7 +357,7 @@ async def chat_endpoint(request: ChatRequest, current_user: UserInDB = Depends(g
                 )
 
         # Standard execution path
-        save_chat_message(thread_id, "user", request.prompt)
+        save_chat_message(thread_id, "user", request.prompt, user_id=current_user.user_id)
 
         final_ai_msg = None
         reasoning = None
@@ -365,7 +387,7 @@ async def chat_endpoint(request: ChatRequest, current_user: UserInDB = Depends(g
             )
 
         if final_ai_msg:
-            save_chat_message(thread_id, "assistant", final_ai_msg)
+            save_chat_message(thread_id, "assistant", final_ai_msg, user_id=current_user.user_id)
 
         logger.info("Chat execution completed.", thread_id=thread_id)
         return ChatResponse(
@@ -388,7 +410,7 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: UserInDB = De
     Provides Server-Sent Events (SSE) for incremental updates.
     """
     thread_id = request.thread_id or str(uuid.uuid4())
-    create_thread(thread_id)
+    create_thread(thread_id, user_id=current_user.user_id)
     config = {
         "configurable": {
             "thread_id": thread_id,
@@ -400,33 +422,43 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: UserInDB = De
     }
 
     async def event_generator():
-        save_chat_message(thread_id, "user", request.prompt)
-        
-        # Check if we are resuming from a human breakpoint
-        current_state = graph.get_state(config)
-        is_resuming = current_state is not None and getattr(current_state, "next", None) == ("human",)
-        
-        if is_resuming:
-            decision = request.prompt.strip().lower()
-            if decision in ["approve", "reject"]:
-                graph.update_state(
-                    config,
-                    {"messages": [HumanMessage(content=f"Human action: {decision}")]},
-                )
-                initial_state = None # Resume from checkpoint
-            else:
-                # If not a valid decision, just treat as a normal message (which might be handled by supervisor if we wanted, but human node usually blocks)
-                initial_state = {"messages": [HumanMessage(content=request.prompt)]}
-        else:
-            initial_state = {"messages": [HumanMessage(content=request.prompt)]}
-
         try:
+            save_chat_message(thread_id, "user", request.prompt, user_id=current_user.user_id)
+            
+            # Check if we are resuming from a human breakpoint
+            current_state = graph.get_state(config)
+            is_resuming = current_state is not None and getattr(current_state, "next", None) == ("human",)
+            
+            if is_resuming:
+                decision = request.prompt.strip().lower()
+                if decision in ["approve", "reject"]:
+                    graph.update_state(
+                        config,
+                        {"messages": [HumanMessage(content=f"Human action: {decision}")]},
+                    )
+                    initial_state = None # Resume from checkpoint
+                else:
+                    initial_state = {
+                        "messages": [HumanMessage(content=request.prompt)],
+                        "next_node": None,
+                        "routing_reasoning": None
+                    }
+            else:
+                initial_state = {"messages": [HumanMessage(content=request.prompt)]}
+
             finished = False
             # We use stream_mode="updates" to get individual node outputs
             reported_urls = set()
+            
+            # Using sync stream because SqliteSaver doesn't support astream
+            logger.info(f"Starting graph execution for thread {thread_id}", extra={"initial_state": str(initial_state)})
             for chunk in graph.stream(initial_state, config=config, stream_mode="updates"):
                 if finished: break
                 for node_name, data in chunk.items():
+                    logger.info(f"Graph chunk received from node: {node_name}")
+                    if data is None:
+                        continue
+                    
                     # Send node start event
                     yield f"data: {json.dumps({'type': 'node_start', 'node': node_name})}\n\n"
                     
@@ -456,24 +488,25 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: UserInDB = De
                                 # Extract URL and filename
                                 match = re.search(r'(https?://[^\s)]+/reports/download/([^\s)]+))', content)
                                 if match:
-                                    url = match.group(1).split(" ")[0].rstrip("->") # Clean up any trailing chars
-                                    filename = match.group(2).split(" ")[0].rstrip("->")
+                                    url_str = match.group(1).split(" ")[0].rstrip("->")
+                                    file_name = match.group(2).split(" ")[0].rstrip("->")
                                     
                                     # Determine type based on extension
-                                    if "xlsx" in filename:
+                                    if "xlsx" in file_name:
                                         type_ = "excel"
-                                    elif "zip" in filename:
+                                    elif "zip" in file_name:
                                         type_ = "image_bundle"
-                                    elif "pdf" in filename:
+                                    elif "pdf" in file_name:
                                         type_ = "pdf"
                                     else:
                                         type_ = "image"
                                         
-                                    if url not in reported_urls:
-                                        yield f"data: {json.dumps({'type': 'report_ready', 'url': url, 'filename': filename, 'report_type': type_})}\n\n"
-                                        reported_urls.add(url)
+                                    if url_str not in reported_urls:
+                                        yield f"data: {json.dumps({'type': 'report_ready', 'url': url_str, 'filename': file_name, 'report_type': type_})}\n\n"
+                                        reported_urls.add(url_str)
                     
-                    await asyncio.sleep(0.05) # Responsive but controlled flow
+                    # Brief sleep to allow other tasks to run
+                    await asyncio.sleep(0.01)
 
             # Check if graph is paused waiting for human approval
             final_state = graph.get_state(config)
@@ -485,6 +518,7 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: UserInDB = De
                         approval_prompt = msg.content
                         break
                 yield f"data: {json.dumps({'type': 'approval_required', 'prompt': approval_prompt})}\n\n"
+            
             messages = final_state.values.get("messages", [])
             final_ai_msg = ""
             
@@ -514,12 +548,14 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: UserInDB = De
             reasoning = final_state.values.get("routing_reasoning")
 
             if final_ai_msg:
-                save_chat_message(thread_id, "assistant", final_ai_msg, metadata={"reasoning": reasoning})
+                save_chat_message(thread_id, "assistant", final_ai_msg, user_id=current_user.user_id, metadata={"reasoning": reasoning})
 
             yield f"data: {json.dumps({'type': 'final_answer', 'response': final_ai_msg, 'reasoning': reasoning, 'thread_id': thread_id})}\n\n"
             
         except Exception as e:
-            logger.exception("Streaming error")
+            import traceback
+            traceback.print_exc()
+            logger.exception(f"Streaming error in thread {thread_id}")
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -695,10 +731,10 @@ async def handle_notification_action(transcript_id: int, action: str = Body(...,
 
 
 @app.get("/chat/suggestions/{thread_id}", tags=["Chat"], summary="Get Chat Suggestions", description="Generates dynamic follow-up questions or suggestions based on the current chat context.")
-async def get_chat_suggestions_endpoint(thread_id: str):
-    """Fetch dynamic suggestions for the current thread to guide the user."""
+async def get_chat_suggestions_endpoint(thread_id: str, current_user: UserInDB = Depends(get_current_active_user)):
+    """Fetch dynamic suggestions for the current thread with user isolation."""
     try:
-        return get_dynamic_suggestions(thread_id)
+        return get_dynamic_suggestions(thread_id, user_id=current_user.user_id)
     except Exception as e:
         logger.error(f"Failed to fetch suggestions: {e}")
         return ["What is the current status?", "Show latest milestones.", "Check project budget."]
@@ -723,17 +759,37 @@ async def resolve_gap_endpoint(gap_id: int, current_user: UserInDB = Depends(get
         raise HTTPException(status_code=404, detail="Gap not found or update failed")
     return {"status": "success", "message": "Access gap resolved"}
 
+@app.post("/tasks/run", tags=["Tasks"], summary="Run Background Agent Task")
+async def run_background_task(request: BackgroundTaskRequest, current_user: UserInDB = Depends(get_current_active_user)):
+    """
+    Triggers an autonomous agent task in the background.
+    Returns a thread_id that can be used to query the chat history for results.
+    """
+    thread_id = await task_runner.run_task_detached(
+        prompt=request.prompt,
+        user_id=current_user.user_id,
+        username=current_user.username,
+        role=current_user.role
+    )
+    return {"status": "success", "message": "Background task started", "thread_id": thread_id}
+
 
 @app.get("/reports/list", tags=["Reports"], summary="List All Reports")
-async def list_reports():
-    """Returns a list of all generated reports in the temporary directory."""
+async def list_reports(current_user: UserInDB = Depends(get_current_active_user)):
+    """Returns a list of generated reports for the current user."""
     try:
         from core.session import REPORTS_TEMP_DIR
         if not os.path.exists(REPORTS_TEMP_DIR):
             return []
             
         reports = []
+        user_prefix = f"{current_user.user_id}_"
+        
         for filename in os.listdir(REPORTS_TEMP_DIR):
+            # Only include reports belonging to this user
+            if not filename.startswith(user_prefix):
+                continue
+                
             filepath = os.path.join(REPORTS_TEMP_DIR, filename)
             if os.path.isfile(filepath):
                 mtime = os.path.getmtime(filepath)
@@ -754,16 +810,21 @@ async def list_reports():
         logger.error("Failed to list reports", error=str(e))
         return []
 
-@app.get("/reports/download/{filename}", tags=["Reports"], summary="Download Report", description="Serves a generated report file (Excel, PDF, or image) for download.")
-async def download_report(filename: str):
+@app.get("/reports/download/{filename}", tags=["Reports"], summary="Download Report", description="Serves a generated report file for download with ownership verification.")
+async def download_report(filename: str, current_user: UserInDB = Depends(get_current_active_user)):
     """
-    Serves a generated Excel or image report file.
-    Includes security checks to prevent path traversal and unauthorized access.
+    Serves a generated report file.
+    Includes ownership verification based on user_id prefix.
     """
     # Prevent path traversal
     if ".." in filename or filename.startswith("/") or filename.startswith("\\"):
         raise HTTPException(status_code=400, detail="Invalid filename")
         
+    # Verify ownership
+    user_prefix = f"{current_user.user_id}_"
+    if not filename.startswith(user_prefix):
+        raise HTTPException(status_code=403, detail="Unauthorized access to report")
+
     file_path = os.path.join(REPORTS_TEMP_DIR, filename)
     
     if not os.path.exists(file_path):

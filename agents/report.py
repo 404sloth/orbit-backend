@@ -8,9 +8,8 @@ from langchain_core.runnables import RunnableConfig
 from core.factory import get_llm
 from core.state import GraphState
 from core.logger import logger
-from db.schema import get_bcnf_schema, get_table_names
-from tools.sql import execute_read_query
 from tools.document import generate_executive_report
+from services.schema_cache import get_cached_schema
 
 def report_node(state: GraphState, config: RunnableConfig) -> dict:
     """
@@ -19,13 +18,12 @@ def report_node(state: GraphState, config: RunnableConfig) -> dict:
     """
     llm = get_llm(temperature=0)
     tools = [
-        execute_read_query,
         generate_executive_report,
     ]
 
-    # Retrieve dynamic schema context
-    table_names = get_table_names()
-    schema_context = get_bcnf_schema(table_names)
+    # Retrieve dynamic schema context from cache (more token-efficient)
+    cached_schema = get_cached_schema()
+    detailed_schema = cached_schema.get("detailed_schema", "No details available.")
 
 
 
@@ -38,17 +36,17 @@ Your job is to generate professional documents (PDF, DOCX) or data spreadsheets 
 CURRENT USER: {username} (Role: {role})
 
 CAPABILITIES:
-1. SQL: Use execute_read_query to fetch data from the database.
-2. DOCUMENTS: Use generate_executive_report to create premium summaries, RFPs, SOWs, or spreadsheets.
+1. DOCUMENTS: Use generate_executive_report to create premium summaries, RFPs, SOWs, or spreadsheets using the data already provided in the conversation. DO NOT attempt to fetch new data.
 
 DATABASE SCHEMA:
-{schema_context}
+{detailed_schema}
 
 STRICT TOOL CALLING RULES:
 - Use ONLY standard ASCII straight double-quotes (") for JSON keys and strings.
 - NEVER use curly quotes (“ or ”).
 - NEVER wrap tool calls in XML-like tags like <function=...>. 
 - Ensure all JSON is perfectly formatted.
+- Call tools ONE AT A TIME.
 
 WORKFLOW:
 1. DATA FOCUS: If the user wants a data export or spreadsheet, use format='EXCEL'.
@@ -57,8 +55,9 @@ WORKFLOW:
 
 RULES:
 - Include executive summaries, key findings, and action items.
-- Always include the download link provided by the tool in your final response so it appears in the Executive Artifacts panel.
+- Always include the download link provided by the tool in your final response.
 - Keep your confirmation concise and professional.
+- Use standard Markdown tables for data representation.
 """
 
     try:
@@ -72,14 +71,31 @@ RULES:
             pruned_messages = list(all_messages)
 
         pruned_len = len(pruned_messages)
-        result = agent_executor.invoke({"messages": pruned_messages})
+        
+        max_retries = 3
+        result = None
+        for attempt in range(max_retries):
+            try:
+                result = agent_executor.invoke({"messages": pruned_messages}, config=config)
+                break
+            except Exception as e:
+                err_str = str(e)
+                if "tool_use_failed" in err_str or "invalid_request_error" in err_str or "Failed to call" in err_str:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Report Agent tool call failed (attempt {attempt + 1}), retrying...", error=err_str)
+                        continue
+                raise
 
-        # Return only new messages
+        # Return only the final AI message to keep the global state clean
         all_messages_after = result["messages"]
+        new_messages = []
         if len(all_messages_after) > pruned_len:
-            new_messages = all_messages_after[pruned_len:]
-        else:
-            new_messages = []
+            from langchain_core.messages import AIMessage
+            final_msg = all_messages_after[-1]
+            if isinstance(final_msg, AIMessage):
+                # Strip metadata to prevent tool_call residue in the supervisor loop
+                clean_m = AIMessage(content=final_msg.content)
+                new_messages.append(clean_m)
         
         logger.info(
             "Report Agent finished",

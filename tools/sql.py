@@ -24,23 +24,26 @@ from core.exceptions import DatabaseQueryError
 from services.credit_service import CreditService
 
 
+from langchain_core.runnables import RunnableConfig
+
 @tool(args_schema=ExecuteQuerySchema)
-def execute_read_query(query: str, user_id: Optional[int] = None, role: str = "USER") -> str:
+def execute_read_query(query: str, config: RunnableConfig, user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Executes a single SELECT SQL query on the project database with strict RBAC enforcement.
-
-    Input:
-        query: A valid SQL SELECT statement.
-        user_id: The ID of the current user (injected from context).
-        role: The role of the current user (injected from context).
-
-    Security:
-        - Only single SELECT statements are allowed.
-        - Automatically injects 'user_id' filters for sensitive tables unless role is ADMIN.
-        - Blocks access to administrative tables (users, permissions).
+    Uses config to automatically retrieve user context if not provided.
     """
-    if user_id is None:
+    # Prefer values from config if available
+    cfg_user_id = config.get("configurable", {}).get("user_id")
+    cfg_role = config.get("configurable", {}).get("role", "USER")
+    
+    actual_user_id = user_id if user_id is not None else cfg_user_id
+    actual_role = role if role != "USER" else cfg_role
+
+    if actual_user_id is None:
         return json.dumps({"status": "error", "message": "Security Error: user_id is required for query execution."})
+
+    user_id = actual_user_id
+    role = actual_role
 
     try:
         parsed_statements = sqlglot.parse(query)
@@ -102,9 +105,8 @@ def execute_read_query(query: str, user_id: Optional[int] = None, role: str = "U
                     node.where(f"{alias}.user_id = {user_id}", copy=False)
         return node
 
-    # Apply transformation (Only for non-ADMIN users)
-    if role != "ADMIN":
-        expression = transform_expression(expression)
+    # Apply transformation (Strict isolation for everyone)
+    expression = transform_expression(expression)
 
     # --- Auto LIMIT guard ---
     if not expression.find(exp.Limit):
@@ -121,11 +123,34 @@ def execute_read_query(query: str, user_id: Optional[int] = None, role: str = "U
             data = [dict(row) for row in rows]
             
             logger.info("SQL Query Executed (RBAC Enforced)", query=final_query, user_id=user_id, row_count=len(data))
+            
+            # Format output compactly for LLM
+            if not data:
+                return json.dumps({"status": "success", "data": "No matching records found."})
+                
+            # If large data, truncate rows but show total count
+            MAX_ROWS = 50
+            is_truncated = len(data) > MAX_ROWS
+            display_data = data[:MAX_ROWS]
+            
+            formatted_lines = []
+            if display_data:
+                headers = list(display_data[0].keys())
+                formatted_lines.append(" | ".join(headers))
+                formatted_lines.append("-" * (len(headers) * 10))
+                for row in display_data:
+                    formatted_lines.append(" | ".join(str(row.get(h, "")) for h in headers))
+            
+            result_str = "\n".join(formatted_lines)
+            if is_truncated:
+                result_str += f"\n... (truncated {len(data) - MAX_ROWS} more rows)"
 
-            return json.dumps({"status": "success", "data": data, "message": f"Returned {len(data)} rows (Scoped to user {user_id})."})
+            return json.dumps({"status": "success", "data": result_str, "message": f"Returned {len(data)} rows (Scoped to user {user_id})."})
     except Exception as e:
-        logger.error("SQL Execution Error", query=final_query, error=str(e))
-        return json.dumps({"status": "error", "message": f"Database Error: {str(e)}"})
+        # Pass raw SQLite error back to the LLM so it can learn from its mistakes
+        error_msg = str(e).replace('"', "'")
+        logger.error("SQL Execution Error", query=final_query, error=error_msg)
+        return json.dumps({"status": "error", "message": f"SQLite Execution Error: {error_msg}. Check your syntax and table schema."})
 
 
 @tool(args_schema=ListTablesSchema)
@@ -225,13 +250,18 @@ def cache_dashboard_metric(metric_key: str, status: str, reason: str) -> str:
 
 
 @tool(args_schema=SearchTranscriptsSchema)
-def search_meeting_transcripts(query: str, user_id: Optional[int] = None, role: str = "USER") -> str:
+def search_meeting_transcripts(query: str, config: RunnableConfig, user_id: Optional[int] = None, role: str = "USER") -> str:
     """
     Searches meeting transcripts for a specific keyword, person, or topic.
     Returns matching snippets and meeting dates.
     """
-    if user_id is None:
+    cfg_user_id = config.get("configurable", {}).get("user_id")
+    actual_user_id = user_id if user_id is not None else cfg_user_id
+
+    if actual_user_id is None:
         return json.dumps({"status": "error", "message": "user_id required."})
+    
+    user_id = actual_user_id
 
     try:
         # We search raw_text for the query. 
@@ -242,8 +272,7 @@ def search_meeting_transcripts(query: str, user_id: Optional[int] = None, role: 
             JOIN projects p ON mt.project_id = p.project_id
             WHERE (mt.raw_text LIKE '%{query}%')
         """
-        if role != "ADMIN":
-            sql += f" AND p.user_id = {user_id}"
+        sql += f" AND p.user_id = {user_id}"
         
         sql += " LIMIT 5"
         with get_db_connection(read_only=True) as conn:

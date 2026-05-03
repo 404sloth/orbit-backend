@@ -7,12 +7,18 @@ from pydantic import field_validator
 
 
 class Settings(BaseSettings):
+    # Environment context
+    environment: str = "dev"
+    tiktoken_cache_dir: str = ""
+    tiktoken_load_path: str = ""
+
     # LLM Provider: 'groq' or 'openai'
     llm_provider: str = "groq"
     
     # API Keys
     groq_api_key: str = ""
     openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
     
     # Models
     groq_model: str = "llama-3.1-70b-versatile"
@@ -58,3 +64,7 @@ if settings.langchain_tracing_v2 == "true" and settings.langchain_api_key:
 else:
     # Explicitly disable if configuration is incomplete to prevent log spam
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
+# Tiktoken cache path for offline/proxy environments
+if settings.tiktoken_cache_dir:
+    os.environ["TIKTOKEN_CACHE_DIR"] = settings.tiktoken_cache_dir

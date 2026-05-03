@@ -50,11 +50,26 @@ def get_llm(temperature: float = 0.0):
     """
     # 1. Initialize Primary Provider
     if settings.llm_provider == "openai":
-        primary_llm = ChatOpenAI(
-            model=settings.openai_model,
-            temperature=temperature,
-            api_key=settings.openai_api_key,
-        )
+        openai_kwargs = {
+            "model": settings.openai_model,
+            "temperature": temperature,
+            "api_key": settings.openai_api_key,
+        }
+        
+        if settings.environment == "ailab":
+            import httpx
+            # Disable SSL verification for lab proxy environments
+            http_client = httpx.Client(verify=False)
+            http_async_client = httpx.AsyncClient(verify=False)
+            
+            openai_kwargs.update({
+                "base_url": settings.openai_base_url,
+                "http_client": http_client,
+                "http_async_client": http_async_client,
+                "tiktoken_model_name": "gpt-3.5-turbo", # optional tiktokenizer config
+            })
+            
+        primary_llm = ChatOpenAI(**openai_kwargs)
     else:
         # Default to Groq
         primary_llm = ChatGroq(

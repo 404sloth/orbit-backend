@@ -32,8 +32,15 @@ meeting transcripts, vendor proposals, requirements documents, and project notes
 
 SECURITY CONTEXT:
 - CURRENT USER: {username} (ID: {user_id}, Role: {role})
-- PRIVACY RULE: {"As an ADMIN, you can access and manage all documents across the system." if role == "ADMIN" else f"You must ONLY access documents that are either 'global' or marked as 'personal' for your User ID ({user_id})."}
-- DATA ISOLATION: {"You can see everything." if role == "ADMIN" else "Never reveal or search for documents belonging to other user IDs. If a user asks for private data outside their scope, inform them that no such document exists in their repository."}
+- PRIVACY RULE: You must ONLY access documents that are either 'global' or marked as 'personal' for your User ID ({user_id}).
+- DATA ISOLATION: Never reveal or search for documents belonging to other user IDs.
+
+STRICT TOOL CALLING RULES:
+- Use ONLY standard ASCII straight double-quotes (") for JSON keys and strings.
+- NEVER use curly quotes (“ or ”).
+- NEVER wrap tool calls in XML-like tags like <function=...>. 
+- Call tools ONE AT A TIME. Do not attempt parallel tool calling.
+- Ensure all JSON is perfectly formatted.
 
 AVAILABLE TOOLS:
 1. search_project_documents — Semantic search across all stored documents.
@@ -42,17 +49,13 @@ AVAILABLE TOOLS:
 WORKFLOW:
 1. ALWAYS use search_project_documents first to find relevant information.
 2. If the user provides new text/transcript to save, use add_documents_to_knowledge_base.
-3. When presenting search results, CITE the source metadata explicitly:
-   e.g., "According to [Meeting Transcript - April 12]..."
-4. If no relevant documents are found, clearly state that and suggest
-   the user may need to ingest the relevant documents first.
+3. When presenting search results, CITE the source explicitely using the tag provided by the search tool.
+4. If no relevant documents are found, clearly state that.
 
 RULES:
 - Never hallucinate information that isn't in the search results.
-- Always cite your sources with the document source label.
+- Always cite your sources using the EXACT source string provided in the search results.
 - Synthesize multiple document results into a coherent executive summary.
-- DO NOT mention internal agent names (e.g., "rag", "sql") or tool names (e.g., "search_tool").
-- DO NOT use internal markers like [SYSTEM] or [AGENT_COMPLETE].
 - Professional, executive-grade responses only.
 """
 
@@ -68,36 +71,33 @@ RULES:
         except Exception:
             pass
 
-        # ROOT FIX: Prune messages to stay within Groq TPM limits
-        all_messages = state["messages"]
-        if len(all_messages) > 12:
-            pruned_messages = [all_messages[0]] + list(all_messages[-10:])
-        else:
-            pruned_messages = list(all_messages)
+        # Filter for standard messages to ensure LLM compatibility (especially for Groq)
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+        raw_messages = state.get("messages", [])
+        pruned_messages = [
+            m for m in raw_messages 
+            if isinstance(m, (HumanMessage, AIMessage, SystemMessage, ToolMessage))
+        ]
 
         # Capture original length BEFORE invocation to avoid mutation bugs
-        # We use the length of pruned_messages because that's what the agent executor starts with
         pruned_len = len(pruned_messages)
-        result = agent_executor.invoke({"messages": pruned_messages})
+        result = agent_executor.invoke({"messages": pruned_messages}, config=config)
 
-        # Return only new messages
+        # Return only new AI messages to keep the global state clean
         all_messages_after = result["messages"]
+        new_messages = []
         if len(all_messages_after) > pruned_len:
-            new_messages = all_messages_after[pruned_len:]
-        else:
-            # If for some reason it's shorter or same length, assume no new messages
-            new_messages = []
-        
-        logger.info(
-            "RAG Agent finished",
-            in_count=len(state["messages"]),
-            out_count=len(all_messages_after),
-            new_count=len(new_messages)
-        )
+            # Only keep the FINAL response to avoid dangly tool_call metadata
+            from langchain_core.messages import AIMessage
+            final_msg = all_messages_after[-1]
+            if isinstance(final_msg, AIMessage):
+                clean_m = AIMessage(content=final_msg.content)
+                new_messages.append(clean_m)
         
         if not new_messages:
+            # Fallback if no AI message was produced
             from langchain_core.messages import SystemMessage
-            new_messages = [SystemMessage(content="[SYSTEM] Knowledge Agent reviewed the history and found no new actions needed.")]
+            new_messages = [SystemMessage(content="[SYSTEM] Knowledge Agent reviewed the data but produced no final summary.")]
 
         return {"messages": new_messages}
 

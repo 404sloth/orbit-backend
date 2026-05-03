@@ -14,6 +14,7 @@ def image_node(state: GraphState, config: Dict[str, Any]) -> dict:
     Image Agent node with Multi-page support and Premium aesthetics.
     """
     session_id = config.get("configurable", {}).get("thread_id", "default_session")
+    user_id = config.get("configurable", {}).get("user_id", "unknown")
     
     logger.info("Image Agent invoked", session_id=session_id)
     
@@ -42,8 +43,6 @@ def image_node(state: GraphState, config: Dict[str, Any]) -> dict:
                 row_html = "".join([f"<td>{row.get(h, '')}</td>" for h in headers_list])
                 rows_html += f"<tr>{row_html}</tr>"
             
-
-
             # Premium HTML Template with Executive Light theme
             html_content = f"""
             <html>
@@ -171,7 +170,7 @@ def image_node(state: GraphState, config: Dict[str, Any]) -> dict:
                         <div class="stat-value">{time.strftime("%d %b %Y")}</div>
                     </div>
                 </div>
-
+ 
                 <table>
                     <thead><tr>{headers_html}</tr></thead>
                     <tbody>{rows_html}</tbody>
@@ -186,14 +185,14 @@ def image_node(state: GraphState, config: Dict[str, Any]) -> dict:
             </html>
             """
             
-            p_filename = f"report_p{p_idx+1}_{session_id[:8]}_{int(time.time())}.png"
+            p_filename = f"{user_id}_report_p{p_idx+1}_{session_id[:8]}_{int(time.time())}.png"
             hti.screenshot(html_str=html_content, save_as=p_filename, size=(1100, 850))
             generated_files.append(p_filename)
 
         # Handle multiple pages with a ZIP file
         zip_filename = None
         if len(generated_files) > 1:
-            zip_filename = f"report_bundle_{session_id[:8]}_{int(time.time())}.zip"
+            zip_filename = f"{user_id}_report_bundle_{session_id[:8]}_{int(time.time())}.zip"
             zip_path = os.path.join(REPORTS_TEMP_DIR, zip_filename)
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for file in generated_files:

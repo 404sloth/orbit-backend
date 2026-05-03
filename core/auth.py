@@ -28,7 +28,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
 
 # Password Security - using argon2 (more secure, no 72-byte limit)
 pwd_context = CryptContext(
-    schemes=["argon2"],
+    schemes=["argon2", "bcrypt"],
     deprecated="auto"
 )
 
@@ -162,16 +162,16 @@ def calculate_lockout_time(failed_attempts: int) -> datetime:
     return datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
 
 # Database Operations
-def get_user(username: str) -> Optional[UserInDB]:
-    """Retrieve user from database by username."""
+def get_user(identifier: str) -> Optional[UserInDB]:
+    """Retrieve user from database by username or email."""
     try:
         with get_db_connection() as conn:
             row = conn.execute("""
                 SELECT user_id, username, email, hashed_password, role, is_active,
                        is_verified, failed_attempts, locked_until, last_login,
                        last_failed_login, password_changed_at, created_at, updated_at
-                FROM users WHERE username = ?
-            """, (username,)).fetchone()
+                FROM users WHERE username = ? OR email = ?
+            """, (identifier, identifier)).fetchone()
 
             if row:
                 return UserInDB(
@@ -191,7 +191,7 @@ def get_user(username: str) -> Optional[UserInDB]:
                     updated_at=row[13]
                 )
     except Exception as e:
-        logger.error(f"Error retrieving user {username}: {str(e)}")
+        logger.error(f"Error retrieving user {identifier}: {str(e)}")
     return None
 
 def create_user(user_data: UserCreate) -> UserInDB:
@@ -348,9 +348,10 @@ def create_refresh_token(data: dict) -> str:
     return encoded_jwt
 
 def verify_token(token: str) -> Optional[TokenData]:
-    """Verify and decode JWT token."""
+    """Verify and decode JWT token with a 30s leeway for clock drift."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # Add leeway to handle minor clock skew between client and server
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"leeway": 30})
         username: str = payload.get("sub")
         role: str = payload.get("role")
         token_type: str = payload.get("type")

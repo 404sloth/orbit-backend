@@ -2,9 +2,9 @@ import sqlite3
 from typing import List, Dict, Any, Optional
 from db.client import get_db_connection
 
-def get_all_projects(user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Any]]:
+def get_all_projects(user_id: int, role: str = "USER") -> List[Dict[str, Any]]:
     """
-    Fetch all projects with their basic info and SOW dates, filtered by user.
+    Fetch all projects with their basic info and SOW dates, strictly filtered by user.
     """
     with get_db_connection() as conn:
         query = """
@@ -30,12 +30,9 @@ def get_all_projects(user_id: Optional[int] = None, role: str = "USER") -> List[
                 ) as progress_percent
             FROM projects p
             LEFT JOIN statements_of_work s ON p.project_id = s.project_id
+            WHERE p.user_id = ?
         """
-        params = []
-        if user_id is not None and role != "ADMIN":
-            query += " WHERE p.user_id = ?"
-            params.append(user_id)
-            
+        params = [user_id]
         rows = conn.execute(query, params).fetchall()
         
     projects = []
@@ -46,18 +43,17 @@ def get_all_projects(user_id: Optional[int] = None, role: str = "USER") -> List[
         projects.append(p)
     return projects
 
-def get_project_timeline(project_id: str, user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Any]]:
+def get_project_timeline(project_id: str, user_id: int, role: str = "USER") -> List[Dict[str, Any]]:
     """
-    Fetch a unified timeline of meetings and milestones for a project, verified by user access.
+    Fetch a unified timeline of meetings and milestones for a project, verified by strict user access.
     """
     timeline = []
     
     with get_db_connection() as conn:
-        # Security check: Ensure the project belongs to the user (Skip for ADMIN)
-        if user_id is not None and role != "ADMIN":
-            access_check = conn.execute("SELECT 1 FROM projects WHERE project_id = ? AND user_id = ?", (project_id, user_id)).fetchone()
-            if not access_check:
-                return []
+        # Security check: Ensure the project belongs to the user
+        access_check = conn.execute("SELECT 1 FROM projects WHERE project_id = ? AND user_id = ?", (project_id, user_id)).fetchone()
+        if not access_check:
+            return []
 
         # Fetch Meetings
         meetings = conn.execute("""
@@ -113,9 +109,9 @@ def get_project_timeline(project_id: str, user_id: Optional[int] = None, role: s
     timeline.sort(key=lambda x: x['date'] or '', reverse=True)
     return timeline
 
-def get_pending_notifications(user_id: Optional[int] = None, role: str = "USER") -> List[Dict[str, Any]]:
+def get_pending_notifications(user_id: int, role: str = "USER") -> List[Dict[str, Any]]:
     """
-    Fetch meeting transcripts that are PENDING processing, scoped to the user.
+    Fetch meeting transcripts that are PENDING processing, strictly scoped to the user.
     """
     with get_db_connection() as conn:
         query = """
@@ -127,15 +123,10 @@ def get_pending_notifications(user_id: Optional[int] = None, role: str = "USER")
                 t.cleaned_summary as summary
             FROM meeting_transcripts t
             JOIN projects p ON t.project_id = p.project_id
-            WHERE t.processing_status = 'PENDING'
+            WHERE t.processing_status = 'PENDING' AND p.user_id = ?
+            ORDER BY t.meeting_date DESC
         """
-        params = []
-        if user_id is not None and role != "ADMIN":
-            query += " AND p.user_id = ?"
-            params.append(user_id)
-            
-        query += " ORDER BY t.meeting_date DESC"
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(query, (user_id,)).fetchall()
     return [dict(row) for row in rows]
 
 def update_notification_status(transcript_id: int, status: str) -> bool:

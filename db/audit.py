@@ -25,7 +25,7 @@ def get_access_gaps(user_id: Optional[int] = None, role: str = "USER") -> List[D
             JOIN permissions perm ON ag.permission_id = perm.permission_id
             """
             params = []
-            if user_id is not None and role != "ADMIN":
+            if user_id is not None:
                 # Show gaps for projects that the current user manages
                 query += " WHERE p.user_id = ?"
                 params.append(user_id)
